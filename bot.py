@@ -28,12 +28,13 @@ import re
 import logging
 import logging.handlers
 import os
+import time  # FIX-4: метрика времени цикла
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
-from nio import AsyncClient
+from nio import AsyncClient, RoomSendResponse, RoomSendError  # FIX-1: импорт для проверки ответа
 from redminelib import Redmine
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
@@ -58,8 +59,6 @@ BOT_TZ = ZoneInfo(os.getenv("BOT_TIMEZONE", "Europe/Moscow"))
 
 # --- Пользователи ---
 # Формат: [{"redmine_id": 1972, "room": "!...", "notify": ["all"]}, ...]
-# notify — типы уведомлений: all (все), new, info, reminder, status_change,
-#          issue_updated, reopened, overdue
 _users_raw = os.getenv("USERS", "[]")
 try:
     USERS = json.loads(_users_raw)
@@ -67,8 +66,6 @@ except (json.JSONDecodeError, TypeError):
     USERS = []
 
 # --- Роутинг по статусу → доп. комната ---
-# Формат: {"Передано в работу.РВ": "!room:server"}
-# Задача с этим статусом ДОПОЛНИТЕЛЬНО отправляется в указанную комнату
 _status_room_raw = os.getenv("STATUS_ROOM_MAP", "{}")
 try:
     STATUS_ROOM_MAP = json.loads(_status_room_raw)
@@ -76,16 +73,11 @@ except (json.JSONDecodeError, TypeError):
     STATUS_ROOM_MAP = {}
 
 # --- Роутинг по версии → доп. комната ---
-# Формат: {"РЕД Виртуализация": "!room:server", "РЕД ОС": "!room:server"}
-# Если подстрока найдена в названии версии — задача дублируется в комнату
 _version_room_raw = os.getenv("VERSION_ROOM_MAP", "{}")
 try:
     VERSION_ROOM_MAP = json.loads(_version_room_raw)
 except (json.JSONDecodeError, TypeError):
     VERSION_ROOM_MAP = {}
-
-# --- Командная комната (для новых задач проекта) ---
-TEAM_ROOM_ID = os.getenv("MATRIX_TEAM_ROOM_ID")
 
 # ═══════════════════════════════════════════════════════════════════════════
 # КОНСТАНТЫ
@@ -96,13 +88,10 @@ BASE_DIR = Path(__file__).resolve().parent
 LOG_FILE = BASE_DIR / "bot.log"
 
 # Интервал проверки Redmine (секунды)
-CHECK_INTERVAL = 30
+CHECK_INTERVAL = 90  # FIX-4: увеличен с 30 (цикл занимает ~58с)
 
 # Через сколько секунд напоминать о «Информация предоставлена»
 REMINDER_AFTER = 3600
-
-# Название проекта для командной комнаты
-PROJECT_NAME_FOR_TEAM = "Ред Вирт"
 
 # --- Статусы Redmine ---
 STATUS_NEW           = "Новая"
@@ -174,6 +163,11 @@ def save_json(filepath, data):
         tmp.replace(filepath)
     except IOError as e:
         logger.error(f"❌ Ошибка записи {filepath.name}: {e}")
+        # FIX-3: убираем мусорный tmp-файл при ошибке записи
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def plural_days(n):
@@ -220,53 +214,52 @@ def should_notify(user_cfg, notification_type):
     return "all" in notify_list or notification_type in notify_list
 
 
+# FIX-4: валидация конфигурации пользователей
+def validate_users(users):
+    """
+    Проверяет, что у каждого пользователя есть обязательные поля.
+    Возвращает (ok: bool, errors: list[str]).
+    """
+    errors = []
+    required_fields = ("redmine_id", "room")
+    for i, u in enumerate(users):
+        for field in required_fields:
+            if field not in u:
+                errors.append(f"USERS[{i}]: отсутствует обязательное поле '{field}'")
+        # redmine_id должен быть числом
+        if "redmine_id" in u and not isinstance(u["redmine_id"], int):
+            errors.append(f"USERS[{i}]: 'redmine_id' должен быть int, получено {type(u['redmine_id']).__name__}")
+        # room должна быть непустой строкой
+        if "room" in u and (not isinstance(u["room"], str) or not u["room"].strip()):
+            errors.append(f"USERS[{i}]: 'room' должен быть непустой строкой")
+        # notify — если указан, должен быть списком
+        if "notify" in u and not isinstance(u["notify"], list):
+            errors.append(f"USERS[{i}]: 'notify' должен быть списком, получено {type(u['notify']).__name__}")
+    return len(errors) == 0, errors
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # РОУТИНГ: какие доп. комнаты получают уведомление
 # ═══════════════════════════════════════════════════════════════════════════
-#
-# Правила:
-# 1. Личная комната пользователя — ВСЕГДА получает уведомление
-# 2. Доп. комнаты — только для определённых событий:
-#
-#    ┌──────────────────────────────┬──────────┬────────┬───────┐
-#    │ Событие                      │ Версион. │ РЕД ОС │ РВ    │
-#    ├──────────────────────────────┼──────────┼────────┼───────┤
-#    │ Новая (версия Виртуализация) │ ✅       │ ❌     │ ❌    │
-#    │ Новая (версия РЕД ОС)       │ ❌       │ ✅     │ ❌    │
-#    │ Новая (другая/без версии)    │ ❌       │ ✅     │ ❌    │
-#    │ Передано в работу.РВ         │ ✅       │ ❌     │ ✅    │
-#    │ Другой «Передано в работу.*» │ ❌       │ ❌     │ ❌    │
-#    │ Смена статуса                │ ❌       │ ❌     │ ❌    │
-#    │ Комментарий/изменение        │ ❌       │ ❌     │ ❌    │
-#    │ Инфо предоставлена (напомин.)│ ❌       │ ❌     │ ❌    │
-#    │ Открыто повторно             │ ❌       │ ❌     │ ❌    │
-#    └──────────────────────────────┴──────────┴────────┴───────┘
 
-# Комната РЕД ОС — для задач без версии Виртуализация
-ROOM_RED_OS_KEY = "РЕД ОС"  # ключ в VERSION_ROOM_MAP
-
-# Комната Виртуализация — для задач с версией «РЕД Виртуализация»
-ROOM_VIRT_KEY = "РЕД Виртуализация"  # ключ в VERSION_ROOM_MAP
+ROOM_RED_OS_KEY = "РЕД ОС"
+ROOM_VIRT_KEY = "РЕД Виртуализация"
 
 
 def get_extra_rooms_for_new(issue):
     """
     Доп. комнаты для НОВОЙ задачи (статус «Новая»).
-
-    Логика:
-    - Если версия содержит «РЕД Виртуализация» → комната Виртуализации
-    - Иначе (РЕД ОС, другая, без версии) → комната РЕД ОС
+    Если версия содержит «РЕД Виртуализация» → комната Виртуализации.
+    Иначе → комната РЕД ОС.
     """
     rooms = set()
     version = get_version_name(issue)
 
     if version and ROOM_VIRT_KEY.lower() in version.lower():
-        # Задача Виртуализации → только в комнату Виртуализации
         virt_room = VERSION_ROOM_MAP.get(ROOM_VIRT_KEY)
         if virt_room:
             rooms.add(virt_room)
     else:
-        # Всё остальное → в комнату РЕД ОС
         os_room = VERSION_ROOM_MAP.get(ROOM_RED_OS_KEY)
         if os_room:
             rooms.add(os_room)
@@ -277,19 +270,14 @@ def get_extra_rooms_for_new(issue):
 def get_extra_rooms_for_rv(issue):
     """
     Доп. комнаты для статуса «Передано в работу.РВ».
-
-    Логика:
-    - Всегда в комнату РВ (STATUS_ROOM_MAP)
-    - Если версия содержит «РЕД Виртуализация» → ещё и в комнату Виртуализации
+    Всегда в комнату РВ + если Виртуализация — ещё и туда.
     """
     rooms = set()
 
-    # Комната РВ (из STATUS_ROOM_MAP)
     rv_room = STATUS_ROOM_MAP.get(STATUS_RV)
     if rv_room:
         rooms.add(rv_room)
 
-    # Если задача по Виртуализации — дублируем и туда
     version = get_version_name(issue)
     if version and ROOM_VIRT_KEY.lower() in version.lower():
         virt_room = VERSION_ROOM_MAP.get(ROOM_VIRT_KEY)
@@ -303,7 +291,6 @@ def get_extra_rooms_for_rv(issue):
 # MATRIX: ОТПРАВКА СООБЩЕНИЙ
 # ═══════════════════════════════════════════════════════════════════════════
 
-# Эмодзи и заголовки для каждого типа уведомления
 NOTIFICATION_TYPES = {
     "new":           ("🆕", "Новая задача"),
     "info":          ("✅", "Информация предоставлена"),
@@ -318,10 +305,10 @@ NOTIFICATION_TYPES = {
 async def send_matrix_message(client, issue, room_id, notification_type="info", extra_text=""):
     """
     Формирует и отправляет HTML-сообщение в Matrix-комнату.
-    Использует <blockquote> для визуального выделения (рамка слева).
+    FIX-1: проверяет ответ сервера — кидает исключение при ошибке.
     """
     issue_url = f"{REDMINE_URL}/issues/{issue.id}"
-    emoji, title = NOTIFICATION_TYPES.get(notification_type, ("\U0001f514", "Обратите внимание"))
+    emoji, title = NOTIFICATION_TYPES.get(notification_type, ("🔔", "Обратите внимание"))
 
     # Текст просрочки
     overdue_text = ""
@@ -336,10 +323,7 @@ async def send_matrix_message(client, issue, room_id, notification_type="info", 
     # Срок
     due_line = ""
     if issue.due_date:
-        due_line = f"<br/>\U0001f4c5 Срок: {issue.due_date}{overdue_text}"
-
-    # Доп. текст (комментарии, смена статуса)
-    extra_line = f"\n\n{extra_text}" if extra_text else ""
+        due_line = f"<br/>📅 Срок: {issue.due_date}{overdue_text}"
 
     # HTML — всё внутри <blockquote> для рамки
     html_body = (
@@ -357,11 +341,11 @@ async def send_matrix_message(client, issue, room_id, notification_type="info", 
         html_body += f"<br/><br/>{extra_text}"
     html_body += (
         f"<br/><br/>"
-        f'\U0001f517 <a href="{issue_url}">Открыть задачу</a>'
+        f'🔗 <a href="{issue_url}">Открыть задачу</a>'
         f"</blockquote>"
     )
 
-    # Плоский текст
+    # Плоский текст (fallback)
     plain_body = (
         f"{emoji} {title} #{issue.id}: {issue.subject} "
         f"| Статус: {issue.status.name}"
@@ -374,8 +358,17 @@ async def send_matrix_message(client, issue, room_id, notification_type="info", 
         "formatted_body": html_body,
     }
 
-    await client.room_send(room_id=room_id, message_type="m.room.message", content=content)
-    logger.info(f"\U0001f4e8 #{issue.id} \u2192 {room_id[:20]}... ({notification_type})")
+    # FIX-1: проверяем ответ Matrix API
+    resp = await client.room_send(
+        room_id=room_id, message_type="m.room.message", content=content
+    )
+    if isinstance(resp, RoomSendError):
+        raise RuntimeError(
+            f"Matrix room_send error: {resp.message} "
+            f"(status_code={resp.status_code}, room={room_id})"
+        )
+
+    logger.info(f"📨 #{issue.id} → {room_id[:20]}... ({notification_type})")
 
 
 async def send_safe(client, issue, room_id, notification_type, extra_text=""):
@@ -408,9 +401,7 @@ def detect_status_change(issue, sent):
 def detect_new_journals(issue, journals_state):
     """
     Находит новые записи в журнале задачи (комментарии, изменения полей).
-
-    Returns:
-        (new_journals, max_journal_id) — список новых записей и макс. ID
+    Returns: (new_journals, max_journal_id)
     """
     issue_id = str(issue.id)
     last_known_id = journals_state.get(issue_id, {}).get("last_journal_id", 0)
@@ -428,26 +419,7 @@ def detect_new_journals(issue, journals_state):
     return new_journals, max_id
 
 
-# Маппинг технических имён полей → человекочитаемые названия.
-# Поля со значением None — скрываются из уведомлений (технический мусор).
-FIELD_NAMES = {
-    "status_id": "Статус",
-    "assigned_to_id": "Назначена",
-    "priority_id": "Приоритет",
-    "done_ratio": "Готовность",
-    "due_date": "Срок",
-    "subject": "Тема",
-    "description": "Описание",
-    "tracker_id": "Трекер",
-    "fixed_version_id": "Версия",
-    "project_id": "Проект",
-    "category_id": "Категория",
-    "parent_id": "Родительская",
-    "start_date": "Дата начала",
-    "estimated_hours": "Оценка часов",
-}
-
-# Имена статусов по ID (чтобы показывать "В работе" вместо "2")
+# Имена статусов по ID
 STATUS_NAMES = {
     "1": "Новая",
     "2": "В работе",
@@ -479,13 +451,32 @@ PRIORITY_NAMES = {
     "4": "1 (Аварийный)",
 }
 
-# Поля, для которых значения — ID из справочников (нужен перевод)
+# Поля, для которых значения — ID из справочников
 ID_FIELD_RESOLVERS = {
     "status_id": STATUS_NAMES,
     "priority_id": PRIORITY_NAMES,
 }
 
-# Поля, которые всегда скрываем (технический мусор, custom fields по номеру)
+# Маппинг технических имён полей → человекочитаемые
+# FIX-4: теперь реально используется в describe_journal
+FIELD_NAMES = {
+    "status_id": "Статус",
+    "assigned_to_id": "Назначена",
+    "priority_id": "Приоритет",
+    "done_ratio": "Готовность",
+    "due_date": "Срок",
+    "subject": "Тема",
+    "description": None,  # Слишком длинное — пропускаем
+    "tracker_id": "Трекер",
+    "fixed_version_id": "Версия",
+    "project_id": "Проект",
+    "category_id": "Категория",
+    "parent_id": "Родительская",
+    "start_date": "Дата начала",
+    "estimated_hours": "Оценка часов",
+}
+
+# Поля, которые всегда скрываем (кастомные поля вида "42")
 HIDDEN_FIELDS_PATTERN = re.compile(r"^\d+$")
 
 
@@ -504,8 +495,9 @@ def resolve_field_value(field_name, value):
 
 def describe_journal(journal, skip_status=False):
     """
-    Описывает одну запись журнала.
-    Показываем только: комментарий и/или смену статуса.
+    Описывает одну запись журнала в человекочитаемом виде.
+    FIX-4: теперь показывает ВСЕ значимые поля (приоритет, назначение и т.д.),
+    а не только status_id.
     """
     parts = []
 
@@ -516,17 +508,27 @@ def describe_journal(journal, skip_status=False):
         except Exception:
             parts.append("💬 Новый комментарий")
 
-    # Смена статуса (только status_id, остальные поля игнорируем)
+    # Изменения полей
     try:
         for detail in journal.details:
             prop = detail.get("name", detail.get("property", "?"))
-            if prop != "status_id":
+
+            # Скрываем числовые кастомные поля (id вида "42")
+            if HIDDEN_FIELDS_PATTERN.match(prop):
                 continue
-            if skip_status:
+
+            # Пропуск статуса если уже отправлен в блоке status_change
+            if prop == "status_id" and skip_status:
                 continue
+
+            # Получаем человекочитаемое название поля
+            field_label = FIELD_NAMES.get(prop)
+            if field_label is None:
+                continue  # Неизвестное поле или description — пропускаем
+
             old_val = resolve_field_value(prop, detail.get("old_value"))
             new_val = resolve_field_value(prop, detail.get("new_value"))
-            parts.append(f"Смена статуса: {old_val} → {new_val}")
+            parts.append(f"{field_label}: {old_val} → {new_val}")
     except Exception:
         pass
 
@@ -544,7 +546,7 @@ async def check_user_issues(client, redmine, user_cfg):
     Определяет что изменилось и рассылает уведомления.
     """
     uid  = user_cfg["redmine_id"]
-    room = user_cfg["room"]  # личная комната пользователя
+    room = user_cfg["room"]
 
     # --- Загружаем задачи из Redmine ---
     try:
@@ -558,12 +560,12 @@ async def check_user_issues(client, redmine, user_cfg):
     logger.info(f"👤 User {uid}: {len(issues)} задач")
 
     # --- Загружаем state-файлы ---
-    sent      = load_json(state_file(uid, "sent"))       # уже уведомлённые задачи
-    reminders = load_json(state_file(uid, "reminders"))   # напоминания «Инфо предоставлена»
-    overdue_n = load_json(state_file(uid, "overdue"))     # просроченные
-    journals  = load_json(state_file(uid, "journals"))    # журналы (комментарии)
+    sent      = load_json(state_file(uid, "sent"))
+    reminders = load_json(state_file(uid, "reminders"))
+    overdue_n = load_json(state_file(uid, "overdue"))
+    journals  = load_json(state_file(uid, "journals"))
 
-    # Флаги: были ли изменения (чтобы не писать на диск зря)
+    # Флаги: были ли изменения
     sent_ch = rem_ch = over_ch = jour_ch = False
 
     now   = now_tz()
@@ -576,68 +578,53 @@ async def check_user_issues(client, redmine, user_cfg):
             # ══════════════════════════════════════════════════════
             # 1. СМЕНА СТАТУСА
             # ══════════════════════════════════════════════════════
-            # Сравниваем текущий статус с сохранённым.
-            # Если изменился — шлём уведомление ТОЛЬКО в личную комнату.
             old_status = detect_status_change(issue, sent)
             if old_status:
                 if should_notify(user_cfg, "status_change"):
                     extra = f"Статус: <strong>{old_status}</strong> → <strong>{issue.status.name}</strong>"
                     await send_safe(client, issue, room, "status_change", extra_text=extra)
-
-                # Обновляем сохранённый статус
                 sent[iid]["status"] = issue.status.name
                 sent_ch = True
 
             # ══════════════════════════════════════════════════════
             # 2. НОВАЯ ЗАДАЧА (статус «Новая»)
             # ══════════════════════════════════════════════════════
-            # Первое обнаружение задачи со статусом «Новая».
-            # Шлём в личную + доп. комнаты (версионная или РЕД ОС).
             if issue.status.name == STATUS_NEW and iid not in sent:
                 if should_notify(user_cfg, "new"):
-                    # Личная комната — всегда
                     await send_safe(client, issue, room, "new")
-                    # Доп. комнаты: Виртуализация или РЕД ОС
                     for extra_room in get_extra_rooms_for_new(issue):
                         await send_safe(client, issue, extra_room, "new")
-
                 sent[iid] = {"notified_at": now.isoformat(), "status": STATUS_NEW}
                 sent_ch = True
 
             # ══════════════════════════════════════════════════════
             # 3. ПЕРЕДАНО В РАБОТУ.РВ
             # ══════════════════════════════════════════════════════
-            # Шлём в личную + комнату РВ + комнату Виртуализации
-            # (если версия — Виртуализация).
             elif issue.status.name == STATUS_RV and iid not in sent:
                 if should_notify(user_cfg, "new"):
                     await send_safe(client, issue, room, "new")
                     for extra_room in get_extra_rooms_for_rv(issue):
                         await send_safe(client, issue, extra_room, "new")
-
                 sent[iid] = {"notified_at": now.isoformat(), "status": STATUS_RV}
                 sent_ch = True
 
             # ══════════════════════════════════════════════════════
             # 4. ИНФОРМАЦИЯ ПРЕДОСТАВЛЕНА
             # ══════════════════════════════════════════════════════
-            # Первое обнаружение — уведомление.
-            # Повторно — напоминание каждый час (только в личную).
             elif issue.status.name == STATUS_INFO_PROVIDED:
                 if iid not in sent:
-                    # Первое обнаружение
                     if should_notify(user_cfg, "info"):
                         await send_safe(client, issue, room, "info")
                     sent[iid] = {"notified_at": now.isoformat(), "status": STATUS_INFO_PROVIDED}
                     sent_ch = True
                 else:
-                    # Напоминание — только в личную комнату
+                    # Напоминание каждый час
                     if should_notify(user_cfg, "reminder"):
-                        notified_at = ensure_tz(datetime.fromisoformat(sent[iid]["notified_at"]))
                         last_rem = reminders.get(iid, {}).get("last_reminder")
                         if last_rem:
                             time_since = (now - ensure_tz(datetime.fromisoformat(last_rem))).total_seconds()
                         else:
+                            notified_at = ensure_tz(datetime.fromisoformat(sent[iid]["notified_at"]))
                             time_since = (now - notified_at).total_seconds()
 
                         if time_since >= REMINDER_AFTER:
@@ -648,8 +635,6 @@ async def check_user_issues(client, redmine, user_cfg):
             # ══════════════════════════════════════════════════════
             # 5. ОТКРЫТО ПОВТОРНО
             # ══════════════════════════════════════════════════════
-            # Задача была закрыта и снова открыта заказчиком.
-            # Только в личную комнату.
             elif issue.status.name == STATUS_REOPENED and iid not in sent:
                 if should_notify(user_cfg, "reopened"):
                     await send_safe(client, issue, room, "reopened")
@@ -657,23 +642,22 @@ async def check_user_issues(client, redmine, user_cfg):
                 sent_ch = True
 
             # ══════════════════════════════════════════════════════
-            # 6. ПРОЧИЕ СТАТУСЫ — первое обнаружение
+            # 6. ПРОЧИЕ СТАТУСЫ — первое обнаружение (тихо)
             # ══════════════════════════════════════════════════════
-            # Задачи с другими статусами (В работе, Ожидается решение и т.д.)
-            # При первом обнаружении — тихо запоминаем, БЕЗ уведомления.
-            # (Уведомления пойдут при смене статуса или изменениях.)
             elif iid not in sent:
                 sent[iid] = {"notified_at": now.isoformat(), "status": issue.status.name}
                 sent_ch = True
 
-            # ══════════════════════════════════════════════════════
+                        # ══════════════════════════════════════════════════════
             # 7. ПРОСРОЧЕННЫЕ ЗАДАЧИ
             # ══════════════════════════════════════════════════════
-            # Если срок прошёл — напоминание раз в сутки, только в личную.
+            # FIX-2: сравнение по дате, а не по timedelta.days
+            # Было:  (now - ensure_tz(datetime.fromisoformat(last_n))).days >= 1
+            # Стало: .date() < today — надёжно работает даже на границе суток
             if issue.due_date and issue.due_date < today:
                 if should_notify(user_cfg, "overdue"):
                     last_n = overdue_n.get(iid, {}).get("last_notified")
-                    if not last_n or (now - ensure_tz(datetime.fromisoformat(last_n))).days >= 1:
+                    if not last_n or ensure_tz(datetime.fromisoformat(last_n)).date() < today:
                         await send_safe(client, issue, room, "overdue")
                         overdue_n[iid] = {"last_notified": now.isoformat()}
                         over_ch = True
@@ -681,17 +665,10 @@ async def check_user_issues(client, redmine, user_cfg):
             # ══════════════════════════════════════════════════════
             # 8. ЖУРНАЛЫ: КОММЕНТАРИИ И ИЗМЕНЕНИЯ ПОЛЕЙ
             # ══════════════════════════════════════════════════════
-            # Проверяем новые записи в журнале задачи.
-            # Это ловит: комментарии заказчика, изменения полей
-            # (даже если статус не менялся — например, коммент
-            # при «Ожидается решение»).
-            # Только в личную комнату.
             new_jrnls, max_id = detect_new_journals(issue, journals)
 
-            # ── Защита от спама старыми журналами ──────────────
-            # Если задачи НЕТ в journals state — значит мы видим
-            # её впервые в контексте журналов. Запоминаем max_id
-            # БЕЗ отправки, чтобы не слать комменты месячной давности.
+            # Защита от спама старыми журналами:
+            # если задачи НЕТ в journals state — запоминаем max_id БЕЗ отправки
             if iid not in journals:
                 if max_id > 0:
                     journals[iid] = {"last_journal_id": max_id}
@@ -706,12 +683,10 @@ async def check_user_issues(client, redmine, user_cfg):
                         combined = f"<em>...и ещё {len(descs) - 5}</em><br/>" + combined
                     await send_safe(client, issue, room, "issue_updated", extra_text=combined)
 
-                # Обновляем last_journal_id
                 if max_id > journals.get(iid, {}).get("last_journal_id", 0):
                     journals[iid] = {"last_journal_id": max_id}
                     jour_ch = True
             else:
-                # Нет новых журналов или не нужно уведомлять — просто обновляем ID
                 if max_id > journals.get(iid, {}).get("last_journal_id", 0):
                     journals[iid] = {"last_journal_id": max_id}
                     jour_ch = True
@@ -738,10 +713,20 @@ async def check_user_issues(client, redmine, user_cfg):
 
 async def check_all_users(client, redmine):
     """Проверка задач ВСЕХ пользователей. Вызывается по таймеру."""
+    # FIX-4: метрика времени цикла
+    start = time.monotonic()
     logger.info(f"🔍 Проверка в {now_tz().strftime('%H:%M:%S')}...")
+
     for user_cfg in USERS:
         await check_user_issues(client, redmine, user_cfg)
-    logger.info("✅ Проверка завершена")
+
+    elapsed = time.monotonic() - start
+    logger.info(f"✅ Проверка завершена за {elapsed:.1f}с")
+    if elapsed > CHECK_INTERVAL * 0.8:
+        logger.warning(
+            f"⚠️ Цикл ({elapsed:.0f}с) приближается к интервалу ({CHECK_INTERVAL}с)! "
+            f"Рассмотрите увеличение CHECK_INTERVAL или оптимизацию API-запросов."
+        )
 
 
 async def daily_report(client, redmine):
@@ -752,7 +737,6 @@ async def daily_report(client, redmine):
     logger.info("📊 Утренний отчёт...")
 
     for user_cfg in USERS:
-        # Отчёт только для пользователей с полной подпиской
         if not should_notify(user_cfg, "all"):
             continue
 
@@ -772,7 +756,6 @@ async def daily_report(client, redmine):
             key=lambda i: i.due_date
         )
 
-        # Формируем HTML
         html = f"<h3>📅 Отчёт на {today.strftime('%d.%m.%Y')}</h3>"
         html += f"<p><strong>Открытых задач:</strong> {len(issues)}</p>"
         html += f"<p><strong>«{STATUS_INFO_PROVIDED}»:</strong> {len(info_provided)}</p>"
@@ -797,10 +780,13 @@ async def daily_report(client, redmine):
         plain = f"Отчёт {today.strftime('%d.%m.%Y')}: {len(issues)} задач, {len(overdue)} просрочено"
 
         try:
-            await client.room_send(room_id=room, message_type="m.room.message", content={
+            resp = await client.room_send(room_id=room, message_type="m.room.message", content={
                 "msgtype": "m.text", "body": plain,
                 "format": "org.matrix.custom.html", "formatted_body": html,
             })
+            # FIX-1: проверяем ответ
+            if isinstance(resp, RoomSendError):
+                raise RuntimeError(f"Matrix error: {resp.message}")
             logger.info(f"📊 Отчёт user {uid}: {len(issues)} задач")
         except Exception as e:
             logger.error(f"❌ Отправка отчёта user {uid}: {e}")
@@ -882,6 +868,13 @@ async def main():
         logger.error("❌ USERS не настроен в .env")
         return
 
+    # FIX-4: валидация структуры USERS
+    valid, errors = validate_users(USERS)
+    if not valid:
+        for err in errors:
+            logger.error(f"❌ {err}")
+        return
+
     # --- Лог конфигурации ---
     for u in USERS:
         logger.info(f"👤 User {u['redmine_id']} → {u['room'][:30]}... notify={u.get('notify')}")
@@ -892,8 +885,6 @@ async def main():
     if VERSION_ROOM_MAP:
         for k, r in VERSION_ROOM_MAP.items():
             logger.info(f"   📦 Версия «{k}» → {r[:30]}...")
-    if TEAM_ROOM_ID:
-        logger.info(f"   🏠 Команда → {TEAM_ROOM_ID[:30]}...")
 
     # --- Миграция старых файлов ---
     migrate_old_state()
@@ -923,8 +914,6 @@ async def main():
         return
 
     # --- Инициализация journals для новых пользователей ---
-    # При первом запуске запоминаем текущие journal ID,
-    # чтобы не слать уведомления о старых комментариях.
     for user_cfg in USERS:
         uid = user_cfg["redmine_id"]
         jf = state_file(uid, "journals")
@@ -951,8 +940,15 @@ async def main():
     scheduler = AsyncIOScheduler(timezone=BOT_TZ)
 
     # Проверка задач — каждые CHECK_INTERVAL секунд
-    scheduler.add_job(check_all_users, "interval", seconds=CHECK_INTERVAL,
-                      args=[client, redmine])
+    # FIX-4: max_instances + coalesce + misfire_grace_time
+    scheduler.add_job(
+        check_all_users, "interval",
+        seconds=CHECK_INTERVAL,
+        args=[client, redmine],
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=30,
+    )
 
     # Утренний отчёт — 09:00
     scheduler.add_job(daily_report, "cron", hour=9, minute=0,
@@ -963,7 +959,10 @@ async def main():
                       args=[redmine])
 
     scheduler.start()
-    logger.info(f"✅ Планировщик: каждые {CHECK_INTERVAL}с, таймзона {BOT_TZ}, пользователей: {len(USERS)}")
+    logger.info(
+        f"✅ Планировщик: каждые {CHECK_INTERVAL}с, таймзона {BOT_TZ}, "
+        f"пользователей: {len(USERS)}"
+    )
 
     # --- Основной цикл ---
     try:
