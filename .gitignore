@@ -1,0 +1,30 @@
+# Секреты
+.env
+
+# Виртуальное окружение
+venv/
+
+# State-файлы бота (генерируются автоматически)
+sent_issues.json
+reminders.json
+overdue_issues.json
+journals.json
+
+# Логи
+bot.log
+bot.log.*
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
