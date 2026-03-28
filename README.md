@@ -1,5 +1,3 @@
-Вот обновлённый README, отражающий текущую модульную архитектуру. Вставь в `README.md`:
-
 ```markdown
 # 🤖 Redmine → Matrix Notification Bot
 
