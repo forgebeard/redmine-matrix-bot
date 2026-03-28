@@ -29,6 +29,7 @@ class MockIssue:
     def __init__(
         self,
         issue_id=12345,
+        subject=None,
         version_name=None,
         status="Новая",
         priority="Нормальный",
@@ -36,7 +37,7 @@ class MockIssue:
         journals=None,
     ):
         self.id = issue_id
-        self.subject = f"Тестовая задача #{issue_id}"
+        self.subject = subject if subject is not None else f"Тестовая задача #{issue_id}"
         self.status = _Named(status)
         self.priority = _Named(priority)
         self.due_date = due_date
