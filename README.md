@@ -1,5 +1,6 @@
+Вот обновлённый README, отражающий текущую модульную архитектуру. Вставь в `README.md`:
 
-
+```markdown
 # 🤖 Redmine → Matrix Notification Bot
 
 Бот автоматически отслеживает изменения в задачах Redmine и отправляет уведомления в Matrix-чат (Element / Synapse / любой Matrix-клиент).
@@ -18,29 +19,31 @@
 | 6 | **Запрос информации** | Уведомление, когда заказчик предоставил информацию |
 | 7 | **Маршрутизация** | Разные статусы / версии / команды → разные комнаты Matrix |
 | 8 | **Мультипользовательность** | Поддержка нескольких пользователей с индивидуальными настройками |
+| 9 | **Рабочие часы и DND** | Уведомления только в рабочее время; Emergency пробивает любой DND |
 
 ---
 
 ## Архитектура
 
 ```
-┌──────────┐   REST API (каждые 30с)  ┌──────────────┐  Matrix C-S API  ┌──────────┐
-│  Redmine │ ◄─────────────────────── │  bot.py      │ ───────────────► │  Matrix  │
-│  (задачи)│                          │  APScheduler │                   │  (чат)   │
-└──────────┘                          └──────┬───────┘                  └──────────┘
-                                             │
-                                      ┌──────▼──────┐
-                                      │ JSON state  │
-                                      │   файлы     │
-                                      └─────────────┘
+┌──────────┐   REST API (каждые 30с)   ┌──────────────┐  Matrix C-S API   ┌──────────┐
+│  Redmine │ ◄──────────────────────── │    src/      │ ────────────────► │  Matrix  │
+│  (задачи)│                           │  APScheduler │                    │  (чат)   │
+└──────────┘                           └──────┬───────┘                   └──────────┘
+                                              │
+                                       ┌──────▼──────┐
+                                       │  data/      │
+                                       │  JSON state │
+                                       └─────────────┘
 ```
 
 **Цикл работы:**
 1. Планировщик вызывает проверку каждые 30 секунд
 2. Для каждого пользователя загружаются назначенные задачи из Redmine
-3. Текущее состояние сравнивается с сохранённым в state-файлах
-4. При обнаружении изменений — уведомление отправляется в Matrix
-5. Новое состояние сохраняется в state-файлы
+3. Текущее состояние сравнивается с сохранённым в state-файлах (`data/`)
+4. `preferences` проверяет: рабочее ли время? включён ли DND? Emergency?
+5. При обнаружении изменений — уведомление форматируется и отправляется в Matrix
+6. Новое состояние сохраняется атомарно в state-файлы
 
 ---
 
@@ -53,6 +56,7 @@
 | Redmine API | `python-redmine` | Получение задач, журналов, статусов |
 | Планировщик | `APScheduler` | Периодические проверки |
 | Конфигурация | `python-dotenv` + `PyYAML` | Секреты из `.env`, маршруты из `config.yaml` |
+| Тестирование | `pytest` + `pytest-asyncio` | 91 тест, 0.11 сек |
 | Процесс-менеджер | systemd | Автозапуск, перезапуск при сбоях |
 
 ---
@@ -60,23 +64,53 @@
 ## Структура проекта
 
 ```
-matrix_bot_firebeard/
-├── bot.py                      # Основной код бота
-├── config.yaml                 # Конфигурация пользователей и маршрутизации
-├── .env                        # Секреты (токены, пароли) — НЕ в git!
-├── .env.example                # Шаблон .env для новых установок
-├── requirements.txt            # Python-зависимости
-├── README.md                   # Этот файл
-├── redmine-matrix-bot.service  # Systemd unit-файл
-├── .gitignore                  # Исключения из git
-├── venv/                       # Виртуальное окружение Python
+redmine-matrix-bot/
+├── src/                            # Исходный код (модульная архитектура)
+│   ├── __init__.py
+│   ├── config.py                   # Конфигурация: .env, валидация, константы
+│   ├── utils.py                    # Утилиты: время, safe_html, truncate
+│   ├── state.py                    # Персистентное состояние (JSON, атомарная запись)
+│   ├── preferences.py              # Рабочие часы, DND, can_notify()
+│   ├── matrix_client.py            # Matrix: singleton-клиент, retry, send_message()
+│   ├── commands.py                 # Обработчики команд бота
+│   ├── onboarding.py               # Подключение новых пользователей
+│   ├── redmine_checks.py           # Проверка изменений в задачах Redmine
+│   ├── reports.py                  # Генерация отчётов
+│   └── routing.py                  # Маршрутизация уведомлений по комнатам
 │
-├── state_*_sent.json           # State: уведомлённые задачи + статусы
-├── state_*_journals.json       # State: последний journal_id для задач
-├── state_*_overdue.json        # State: даты уведомлений о просрочках
-├── state_*_reminders.json      # State: даты напоминаний о дедлайнах
-└── bot.log                     # Лог работы бота
+├── tests/                          # Тесты (91 шт.)
+│   ├── conftest.py                 # Фикстуры и sys.path
+│   ├── test_config.py              # 15 тестов
+│   ├── test_utils.py               # 25 тестов
+│   ├── test_state.py               # 14 тестов
+│   ├── test_preferences.py         # 27 тестов
+│   └── test_matrix_client.py       # 10 тестов
+│
+├── data/                           # State-файлы JSON (gitignored)
+├── config.yaml                     # Конфигурация пользователей и маршрутизации
+├── .env                            # Секреты (токены) — НЕ в git!
+├── .env.example                    # Шаблон .env для новых установок
+├── requirements.txt                # Python-зависимости
+├── pytest.ini                      # Настройки pytest (pythonpath = src)
+├── README.md                       # Этот файл
+├── redmine-matrix-bot.service      # Systemd unit-файл
+└── .gitignore                      # Исключения из git
 ```
+
+### Модули `src/` — краткое описание
+
+| Модуль | Назначение | Тесты |
+|--------|-----------|:-----:|
+| `config.py` | Загрузка `.env`, пути, приоритеты, статусы Redmine, `validate_config()` | 15 |
+| `utils.py` | `now()`, `safe_html()`, `truncate_text()`, timezone | 25 |
+| `state.py` | `load_state()` / `save_state()` — JSON с атомарной записью | 14 |
+| `preferences.py` | Рабочие часы, DND, `can_notify()` с Emergency bypass | 27 |
+| `matrix_client.py` | Singleton `AsyncClient`, access_token, retry × 3, `send_message()` | 10 |
+| `redmine_checks.py` | Основная логика проверки задач | — |
+| `routing.py` | Выбор комнаты Matrix по статусу/версии задачи | — |
+| `commands.py` | Интерактивные команды бота | — |
+| `onboarding.py` | Регистрация новых пользователей | — |
+| `reports.py` | Генерация отчётов | — |
 
 ---
 
@@ -85,8 +119,8 @@ matrix_bot_firebeard/
 ### 1. Клонирование и окружение
 
 ```bash
-git clone <repo_url> matrix_bot_firebeard
-cd matrix_bot_firebeard
+git clone git@github.com:forgebeard/redmine-matrix-bot.git
+cd redmine-matrix-bot
 
 python3 -m venv venv
 source venv/bin/activate
@@ -106,19 +140,31 @@ nano .env   # заполнить все переменные (см. раздел
 nano config.yaml   # настроить пользователей (см. раздел «Настройка config.yaml»)
 ```
 
-### 4. Тестовый запуск
+### 4. Проверка конфигурации
 
 ```bash
-python3 bot.py
+cd src && python3 -c "from config import validate_config; ok, m = validate_config(); print('✅ OK' if ok else f'❌ Не хватает: {m}')"
 ```
 
-Если в логе видно `✅ Matrix: ...` и `✅ Redmine: ...` — бот работает корректно. Остановить — `Ctrl+C`.
-
-### 5. Установка как systemd-сервис
+### 5. Запуск тестов
 
 ```bash
-# Отредактировать пути в unit-файле под свою систему
-nano redmine-matrix-bot.service
+python -m pytest tests/ -v --tb=short
+# Ожидается: 91 passed
+```
+
+### 6. Тестовый запуск бота
+
+```bash
+python3 src/bot.py
+```
+
+Если в логе видно `✅ Matrix: ...` и `✅ Redmine: ...` — бот работает. Остановить — `Ctrl+C`.
+
+### 7. Установка как systemd-сервис
+
+```bash
+nano redmine-matrix-bot.service   # указать пути и пользователя
 
 sudo cp redmine-matrix-bot.service /etc/systemd/system/
 sudo systemctl daemon-reload
@@ -133,8 +179,9 @@ sudo systemctl start redmine-matrix-bot
 ```env
 # ─── Matrix-сервер ───────────────────────────────────
 MATRIX_HOMESERVER=https://messenger.example.com
-MATRIX_USER=@bot_user:messenger.example.com
-MATRIX_PASSWORD=your_bot_password
+MATRIX_ACCESS_TOKEN=syt_your_access_token_here
+MATRIX_USER_ID=@bot_user:messenger.example.com
+MATRIX_DEVICE_ID=BOTDEVICE
 
 # ─── Redmine ─────────────────────────────────────────
 REDMINE_URL=https://redmine.example.com
@@ -145,9 +192,12 @@ REDMINE_API_KEY=your_redmine_api_key
 
 | Параметр | Где получить |
 |----------|-------------|
-| `MATRIX_USER` | Создайте отдельного пользователя на Matrix-сервере для бота |
-| `MATRIX_PASSWORD` | Пароль этого пользователя |
+| `MATRIX_ACCESS_TOKEN` | Element → Настройки → Помощь и О программе → Access Token |
+| `MATRIX_USER_ID` | Формат: `@username:your.server` |
+| `MATRIX_DEVICE_ID` | Любой идентификатор (например, `BOTDEVICE`) |
 | `REDMINE_API_KEY` | Redmine → Моя учётная запись → API-ключ (правая колонка) |
+
+> ⚠️ **Важно:** Бот использует `access_token` (не пароль) для авторизации в Matrix — это безопаснее и не требует login-flow.
 
 > ⚠️ **Важно:** API-ключ Redmine определяет, чьи задачи бот может видеть. Рекомендуется использовать ключ с правами администратора, если бот обслуживает нескольких пользователей.
 
@@ -172,13 +222,11 @@ users:
     notify: ["new", "info", "issue_updated"]          # Только выбранные типы
 
     # Маршрутизация по статусу задачи:
-    # задачи с этим статусом → в указанную комнату
     status_routes:
       - status: "Передано в работу"
         room: "!team_room:messenger.example.com"
 
     # Маршрутизация по версии (продукту):
-    # если версия задачи содержит подстроку → в указанную комнату
     version_routes:
       - match: "Продукт А"
         room: "!product_a_room:messenger.example.com"
@@ -228,16 +276,18 @@ https://redmine.example.com/users/1972
 
 ## State-файлы
 
-Бот хранит состояние в JSON-файлах (вместо БД — для простоты и переносимости):
+Бот хранит состояние в JSON-файлах в директории `data/` (вместо БД — для простоты и переносимости):
 
 | Файл | Назначение |
 |------|-----------|
-| `state_{uid}_sent.json` | Задачи, о которых уже уведомили + их текущий статус |
-| `state_{uid}_journals.json` | Последний `journal_id` — для отслеживания новых изменений |
-| `state_{uid}_overdue.json` | Дата последнего уведомления о просрочке |
-| `state_{uid}_reminders.json` | Дата последнего напоминания о дедлайне |
+| `data/state_{uid}_sent.json` | Задачи, о которых уже уведомили + их текущий статус |
+| `data/state_{uid}_journals.json` | Последний `journal_id` — для отслеживания новых изменений |
+| `data/state_{uid}_overdue.json` | Дата последнего уведомления о просрочке |
+| `data/state_{uid}_reminders.json` | Дата последнего напоминания о дедлайне |
 
 `{uid}` — Redmine user ID из `config.yaml`.
+
+Директория `data/` создаётся автоматически при первом запуске. Запись файлов — **атомарная** (через temp-файл + rename), что предотвращает повреждение данных при внезапном отключении.
 
 > 💡 При **первом запуске** бот НЕ отправляет уведомления — только запоминает текущее состояние всех задач. Это предотвращает спам при начальной инициализации.
 
@@ -245,19 +295,32 @@ https://redmine.example.com/users/1972
 
 ```bash
 # Полный сброс — бот заново запомнит состояние (без спама при первом цикле)
-rm -f state_*.json
+rm -f data/state_*.json
 sudo systemctl restart redmine-matrix-bot
 
 # Сброс только journals — при следующем цикле обработает все журналы как новые
-rm -f state_*_journals.json
+rm -f data/state_*_journals.json
 sudo systemctl restart redmine-matrix-bot
 ```
 
 ---
 
+## Рабочие часы и DND
+
+Бот поддерживает режим рабочего времени и «Не беспокоить»:
+
+| Параметр | По умолчанию | Описание |
+|----------|:------------:|----------|
+| Рабочие часы | 09:00–18:00 | Уведомления отправляются только в этот интервал |
+| Рабочие дни | Пн–Пт | Выходные = тишина |
+| DND | выкл. | Пользователь может включить вручную |
+| Emergency | всегда | Приоритет «Немедленный» пробивает любой DND и нерабочее время |
+
+---
+
 ## Формат уведомлений
 
-Все уведомления отправляются в HTML (`org.matrix.custom.html`) с кликабельными ссылками.
+Все уведомления отправляются в HTML (`org.matrix.custom.html`) с кликабельными ссылками. Спецсимволы в данных из Redmine автоматически экранируются (`safe_html`).
 
 ### 🆕 Новая задача
 
@@ -344,6 +407,31 @@ sudo systemctl restart redmine-matrix-bot
 
 ---
 
+## Тестирование
+
+Проект покрыт **91 тестом** (время прогона ~0.11 сек):
+
+```bash
+# Все тесты
+python -m pytest tests/ -v --tb=short
+
+# Один модуль
+python -m pytest tests/test_preferences.py -v
+
+# С покрытием (если установлен pytest-cov)
+python -m pytest tests/ --cov=src --cov-report=term-missing
+```
+
+| Модуль | Тестов | Что проверяется |
+|--------|:------:|----------------|
+| `config.py` | 15 | Загрузка env, валидация, приоритеты, маппинг |
+| `utils.py` | 25 | Timezone, HTML-экранирование, truncate, edge cases |
+| `state.py` | 14 | JSON load/save, атомарная запись, битые данные |
+| `preferences.py` | 27 | Рабочие часы, DND, Emergency bypass |
+| `matrix_client.py` | 10 | Singleton, retry, send, моки nio |
+
+---
+
 ## Systemd-сервис
 
 ### Установка
@@ -358,10 +446,10 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=your_user                          # ← ваш системный пользователь
-Group=your_user                         # ← ваша группа
-WorkingDirectory=/path/to/matrix_bot_firebeard   # ← путь к проекту
-ExecStart=/path/to/matrix_bot_firebeard/venv/bin/python3 bot.py
+User=your_user
+Group=your_user
+WorkingDirectory=/path/to/redmine-matrix-bot
+ExecStart=/path/to/redmine-matrix-bot/venv/bin/python3 src/bot.py
 Restart=always
 RestartSec=10
 
@@ -390,22 +478,21 @@ tail -f bot.log
 # Последние 50 строк
 tail -50 bot.log
 
-# Проверка синтаксиса перед деплоем
-python3 -c "import ast; ast.parse(open('bot.py').read()); print('✅ OK')"
-
 # Посмотреть state-файлы
-python3 -m json.tool state_*_sent.json | head -30
-python3 -m json.tool state_*_journals.json | head -30
+python3 -m json.tool data/state_*_sent.json | head -30
+
+# Проверка конфигурации
+cd src && python3 -c "from config import validate_config; print(validate_config())"
 ```
 
 ### Пример лога (штатная работа)
 
 ```log
-2026-03-27 16:39:40 [INFO] 🔍 Проверка в 11:39:40...
-2026-03-27 16:39:47 [INFO] 👤 User 1972: 32 задач
-2026-03-27 16:39:48 [INFO] 📨 #63603 → !room_id... (status_change)
-2026-03-27 16:40:26 [INFO] 👤 User 3254: 29 задач
-2026-03-27 16:40:45 [INFO] ✅ Проверка завершена
+2025-07-14 16:39:40 [INFO] 🔍 Проверка в 16:39:40...
+2025-07-14 16:39:47 [INFO] 👤 User 1972: 32 задач
+2025-07-14 16:39:48 [INFO] 📨 #63603 → !room_id... (status_change)
+2025-07-14 16:40:26 [INFO] 👤 User 3254: 29 задач
+2025-07-14 16:40:45 [INFO] ✅ Проверка завершена
 ```
 
 ---
@@ -415,9 +502,11 @@ python3 -m json.tool state_*_journals.json | head -30
 | Аспект | Решение |
 |--------|---------|
 | Секреты | Хранятся в `.env`, не в коде |
-| Git | `.env` и `state_*.json` в `.gitignore` |
-| Запись файлов | Атомарная (`.tmp` + `rename`) |
+| Авторизация Matrix | `access_token` (не пароль) |
+| Git | `.env`, `data/`, `*.log` в `.gitignore` |
+| Запись файлов | Атомарная (`tempfile` + `os.replace`) |
 | Логи | Не содержат токенов и API-ключей |
+| HTML-инъекции | `safe_html()` экранирует данные из Redmine |
 | Systemd | Запуск от непривилегированного пользователя |
 | Redmine API | Только чтение (`assigned_to_id=me`) |
 
@@ -428,39 +517,47 @@ python3 -m json.tool state_*_journals.json | head -30
 ### Бот не запускается
 
 ```bash
-# Проверить синтаксис
-python3 -c "import ast; ast.parse(open('bot.py').read()); print('OK')"
+# Проверить конфигурацию
+cd src && python3 -c "from config import validate_config; ok, m = validate_config(); print('OK' if ok else m)"
 
 # Проверить зависимости
 source venv/bin/activate
 pip install -r requirements.txt
 
 # Запустить вручную и посмотреть ошибки
-./venv/bin/python bot.py 2>&1 | head -30
+python3 src/bot.py 2>&1 | head -30
 ```
 
 ### Бот не отправляет уведомления
 
-1. Проверьте, что бот присоединён к комнатам Matrix (пригласите его)
-2. Проверьте `REDMINE_API_KEY` — ключ должен иметь доступ к задачам пользователей
-3. Проверьте Redmine user ID в `config.yaml` — откройте профиль в Redmine, ID в URL
-4. Посмотрите лог: `tail -50 bot.log`
+1. Проверьте `MATRIX_ACCESS_TOKEN` — токен может быть просрочен
+2. Проверьте, что бот присоединён к комнатам Matrix (пригласите его)
+3. Проверьте `REDMINE_API_KEY` — ключ должен иметь доступ к задачам
+4. Проверьте Redmine user ID в `config.yaml` — ID в URL профиля
+5. Посмотрите лог: `tail -50 bot.log`
 
 ### Бот спамит старыми уведомлениями после перезапуска
 
 Удалите state-файлы — бот заново проинициализирует состояние:
 
 ```bash
-rm -f state_*.json
+rm -f data/state_*.json
 sudo systemctl restart redmine-matrix-bot
 ```
 
 ### Matrix: «не удалось отправить»
 
-Проверьте, что бот-пользователь:
-- Создан на Matrix-сервере
-- Приглашён в нужные комнаты
-- Принял приглашения (бот делает это автоматически при старте)
+- Бот повторяет отправку до 3 раз с паузой 2 сек
+- Проверьте, что бот-пользователь создан и приглашён в комнаты
+- Проверьте `MATRIX_HOMESERVER` — URL должен быть доступен с сервера бота
+
+### Тесты падают
+
+```bash
+# Убедитесь что запускаете из корня проекта
+cd /path/to/redmine-matrix-bot
+python -m pytest tests/ -v --tb=long
+```
 
 ---
 
