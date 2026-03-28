@@ -28,13 +28,19 @@ import re
 import logging
 import logging.handlers
 import os
+import sys
 import time  # FIX-4: метрика времени цикла
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+_SRC_DIR = Path(__file__).resolve().parent / "src"
+if str(_SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(_SRC_DIR))
+from utils import safe_html
+
 from dotenv import load_dotenv
-from nio import AsyncClient, RoomSendResponse, RoomSendError  # FIX-1: импорт для проверки ответа
+from nio import AsyncClient, RoomSendError
 from redminelib import Redmine
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
@@ -92,6 +98,10 @@ CHECK_INTERVAL = 90  # FIX-4: увеличен с 30 (цикл занимает 
 
 # Через сколько секунд напоминать о «Информация предоставлена»
 REMINDER_AFTER = 3600
+
+# Matrix: повторы при временных сбоях (см. src/matrix_client.py)
+MATRIX_SEND_MAX_RETRIES = 3
+MATRIX_SEND_RETRY_BASE_SEC = 1.0
 
 # --- Статусы Redmine ---
 STATUS_NEW           = "Новая"
@@ -302,6 +312,51 @@ NOTIFICATION_TYPES = {
 }
 
 
+async def room_send_with_retry(client, room_id, content):
+    """
+    Отправка m.room.message с повторными попытками и экспоненциальной паузой.
+
+    При ошибке (RoomSendError, исключение сети) логирует warning и повторяет
+    до MATRIX_SEND_MAX_RETRIES раз. После исчерпания попыток пробрасывает
+    последнюю ошибку.
+    """
+    last_err = None
+
+    for attempt in range(1, MATRIX_SEND_MAX_RETRIES + 1):
+        try:
+            resp = await client.room_send(
+                room_id=room_id, message_type="m.room.message", content=content
+            )
+            if isinstance(resp, RoomSendError):
+                last_err = RuntimeError(
+                    f"Matrix room_send error: {resp.message} "
+                    f"(status_code={resp.status_code}, room={room_id})"
+                )
+            else:
+                return resp
+        except Exception as e:
+            last_err = e
+
+        if attempt >= MATRIX_SEND_MAX_RETRIES:
+            break
+
+        delay = MATRIX_SEND_RETRY_BASE_SEC * (2 ** (attempt - 1))
+        logger.warning(
+            "Matrix send failed (%s/%s): %s; retry in %.1fs",
+            attempt,
+            MATRIX_SEND_MAX_RETRIES,
+            last_err,
+            delay,
+        )
+        await asyncio.sleep(delay)
+
+    if last_err is not None:
+        raise last_err
+    raise RuntimeError(
+        f"Matrix room_send failed after {MATRIX_SEND_MAX_RETRIES} attempts (room={room_id})"
+    )
+
+
 async def send_matrix_message(client, issue, room_id, notification_type="info", extra_text=""):
     """
     Формирует и отправляет HTML-сообщение в Matrix-комнату.
@@ -318,22 +373,26 @@ async def send_matrix_message(client, issue, room_id, notification_type="info", 
 
     # Версия
     version = get_version_name(issue)
-    version_line = f"<br/>Версия: {version}" if version else ""
+    version_line = f"<br/>Версия: {safe_html(version)}" if version else ""
 
     # Срок
     due_line = ""
     if issue.due_date:
         due_line = f"<br/>📅 Срок: {issue.due_date}{overdue_text}"
 
+    subj = safe_html(issue.subject)
+    st = safe_html(issue.status.name)
+    pr = safe_html(issue.priority.name)
+
     # HTML — всё внутри <blockquote> для рамки
     html_body = (
         f"<blockquote>"
         f"<strong>{emoji} {title}</strong><br/>"
         f"<br/>"
-        f'<a href="{issue_url}">#{issue.id}</a> — {issue.subject}<br/>'
+        f'<a href="{issue_url}">#{issue.id}</a> — {subj}<br/>'
         f"<br/>"
-        f"Статус: <strong>{issue.status.name}</strong><br/>"
-        f"Приоритет: {issue.priority.name}"
+        f"Статус: <strong>{st}</strong><br/>"
+        f"Приоритет: {pr}"
         f"{version_line}"
         f"{due_line}"
     )
@@ -358,15 +417,7 @@ async def send_matrix_message(client, issue, room_id, notification_type="info", 
         "formatted_body": html_body,
     }
 
-    # FIX-1: проверяем ответ Matrix API
-    resp = await client.room_send(
-        room_id=room_id, message_type="m.room.message", content=content
-    )
-    if isinstance(resp, RoomSendError):
-        raise RuntimeError(
-            f"Matrix room_send error: {resp.message} "
-            f"(status_code={resp.status_code}, room={room_id})"
-        )
+    await room_send_with_retry(client, room_id, content)
 
     logger.info(f"📨 #{issue.id} → {room_id[:20]}... ({notification_type})")
 
@@ -581,7 +632,10 @@ async def check_user_issues(client, redmine, user_cfg):
             old_status = detect_status_change(issue, sent)
             if old_status:
                 if should_notify(user_cfg, "status_change"):
-                    extra = f"Статус: <strong>{old_status}</strong> → <strong>{issue.status.name}</strong>"
+                    extra = (
+                        f"Статус: <strong>{safe_html(old_status)}</strong> "
+                        f"→ <strong>{safe_html(issue.status.name)}</strong>"
+                    )
                     await send_safe(client, issue, room, "status_change", extra_text=extra)
                 sent[iid]["status"] = issue.status.name
                 sent_ch = True
@@ -678,7 +732,8 @@ async def check_user_issues(client, redmine, user_cfg):
                 _skip_st = old_status is not None
                 descs = [d for d in (describe_journal(j, skip_status=_skip_st) for j in new_jrnls) if d]
                 if descs:
-                    combined = "<br/>".join(descs[-5:])
+                    tail = descs[-5:]
+                    combined = "<br/>".join(safe_html(d) for d in tail)
                     if len(descs) > 5:
                         combined = f"<em>...и ещё {len(descs) - 5}</em><br/>" + combined
                     await send_safe(client, issue, room, "issue_updated", extra_text=combined)
@@ -763,7 +818,10 @@ async def daily_report(client, redmine):
         if info_provided:
             html += "<ul>"
             for i in info_provided[:10]:
-                html += f'<li><a href="{REDMINE_URL}/issues/{i.id}">#{i.id}</a> — {i.subject}</li>'
+                html += (
+                    f'<li><a href="{REDMINE_URL}/issues/{i.id}">#{i.id}</a> '
+                    f"— {safe_html(i.subject)}</li>"
+                )
             html += "</ul>"
             if len(info_provided) > 10:
                 html += f"<p><em>...и ещё {len(info_provided) - 10}</em></p>"
@@ -773,20 +831,19 @@ async def daily_report(client, redmine):
             html += "<ul>"
             for i in overdue[:10]:
                 days = (today - i.due_date).days
-                html += (f'<li><a href="{REDMINE_URL}/issues/{i.id}">#{i.id}</a>'
-                         f" — {i.subject} ({plural_days(days)})</li>")
+                html += (
+                    f'<li><a href="{REDMINE_URL}/issues/{i.id}">#{i.id}</a> '
+                    f"— {safe_html(i.subject)} ({plural_days(days)})</li>"
+                )
             html += "</ul>"
 
         plain = f"Отчёт {today.strftime('%d.%m.%Y')}: {len(issues)} задач, {len(overdue)} просрочено"
 
         try:
-            resp = await client.room_send(room_id=room, message_type="m.room.message", content={
+            await room_send_with_retry(client, room, {
                 "msgtype": "m.text", "body": plain,
                 "format": "org.matrix.custom.html", "formatted_body": html,
             })
-            # FIX-1: проверяем ответ
-            if isinstance(resp, RoomSendError):
-                raise RuntimeError(f"Matrix error: {resp.message}")
             logger.info(f"📊 Отчёт user {uid}: {len(issues)} задач")
         except Exception as e:
             logger.error(f"❌ Отправка отчёта user {uid}: {e}")

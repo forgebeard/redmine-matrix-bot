@@ -493,6 +493,67 @@ class TestRouting:
 # ═══════════════════════════════════════════════════════════════════════════
 
 
+class TestRoomSendWithRetry:
+    """Повторы отправки в Matrix (room_send_with_retry)."""
+
+    @pytest.mark.asyncio
+    async def test_success_after_two_errors(self):
+        """Две неудачи, третья попытка успешна — без исключения."""
+        from nio.responses import RoomSendError
+
+        mock_err = RoomSendError.from_dict(
+            {"error": "Temporary", "errcode": "M_UNKNOWN"},
+            "!room:server",
+        )
+        success = MagicMock()
+        success.__class__ = type("RoomSendResponse", (), {})
+
+        client = AsyncMock()
+        client.room_send = AsyncMock(side_effect=[mock_err, mock_err, success])
+
+        with patch("bot.asyncio.sleep", new_callable=AsyncMock):
+            await bot.room_send_with_retry(
+                client, "!room:server", {"msgtype": "m.text", "body": "x"}
+            )
+
+        assert client.room_send.call_count == 3
+
+    @pytest.mark.asyncio
+    async def test_all_attempts_fail_room_send_error(self):
+        """Все попытки вернули RoomSendError — RuntimeError."""
+        from nio.responses import RoomSendError
+
+        mock_err = RoomSendError.from_dict(
+            {"error": "Rate limited", "errcode": "M_LIMIT_EXCEEDED"},
+            "xroom:server",
+        )
+
+        client = AsyncMock()
+        client.room_send = AsyncMock(return_value=mock_err)
+
+        with patch("bot.asyncio.sleep", new_callable=AsyncMock):
+            with pytest.raises(RuntimeError, match="Matrix room_send error"):
+                await bot.room_send_with_retry(
+                    client, "xroom:server", {"msgtype": "m.text", "body": "x"}
+                )
+
+        assert client.room_send.call_count == bot.MATRIX_SEND_MAX_RETRIES
+
+    @pytest.mark.asyncio
+    async def test_network_exception_retries_then_raises(self):
+        """Исключение на каждой попытке — после MAX_RETRIES проброс."""
+        client = AsyncMock()
+        client.room_send = AsyncMock(side_effect=OSError("connection reset"))
+
+        with patch("bot.asyncio.sleep", new_callable=AsyncMock):
+            with pytest.raises(OSError, match="connection reset"):
+                await bot.room_send_with_retry(
+                    client, "!r:s", {"msgtype": "m.text", "body": "x"}
+                )
+
+        assert client.room_send.call_count == bot.MATRIX_SEND_MAX_RETRIES
+
+
 class TestSendMatrixMessage:
     """Тесты отправки сообщений в Matrix."""
 
@@ -548,6 +609,18 @@ class TestSendMatrixMessage:
         assert "В работе" in content["formatted_body"]
 
     @pytest.mark.asyncio
+    async def test_subject_special_chars_escaped(self, mock_matrix_client):
+        """Тема с <>& — экранируется в HTML."""
+        issue = MockIssue(issue_id=4242, subject='Сервер <prod> & "тест"')
+        await bot.send_matrix_message(mock_matrix_client, issue, "!room:server", "new")
+        call_args = mock_matrix_client.room_send.call_args
+        content = call_args[1]["content"] if "content" in call_args[1] else call_args.kwargs["content"]
+        body = content["formatted_body"]
+        assert "<prod>" not in body
+        assert "&lt;prod&gt;" in body
+        assert "&amp;" in body
+
+    @pytest.mark.asyncio
     async def test_version_shown_when_present(self, mock_matrix_client, issue_with_version):
         """Версия отображается в сообщении, если есть."""
         await bot.send_matrix_message(
@@ -559,7 +632,7 @@ class TestSendMatrixMessage:
 
     @pytest.mark.asyncio
     async def test_room_send_error_raises(self, simple_issue):
-        """FIX-1: RoomSendError → RuntimeError."""
+        """После исчерпания повторов RoomSendError → RuntimeError."""
         from nio.responses import RoomSendError
 
         mock_error = RoomSendError.from_dict(
@@ -570,10 +643,13 @@ class TestSendMatrixMessage:
         client = AsyncMock()
         client.room_send = AsyncMock(return_value=mock_error)
 
-        with pytest.raises(RuntimeError, match="Matrix room_send error"):
-            await bot.send_matrix_message(
-                client, simple_issue, "xroom:server", "new"
-            )
+        with patch("bot.asyncio.sleep", new_callable=AsyncMock):
+            with pytest.raises(RuntimeError, match="Matrix room_send error"):
+                await bot.send_matrix_message(
+                    client, simple_issue, "xroom:server", "new"
+                )
+
+        assert client.room_send.call_count == bot.MATRIX_SEND_MAX_RETRIES
 
 
 class TestSendSafe:
@@ -584,8 +660,10 @@ class TestSendSafe:
         """send_safe НЕ пробрасывает исключения — логирует."""
         client = AsyncMock()
         client.room_send = AsyncMock(side_effect=Exception("Network error"))
-        # Не должен кинуть исключение
-        await bot.send_safe(client, simple_issue, "!room:server", "new")
+        with patch("bot.asyncio.sleep", new_callable=AsyncMock):
+            # Не должен кинуть исключение (несколько попыток room_send)
+            await bot.send_safe(client, simple_issue, "!room:server", "new")
+        assert client.room_send.call_count == bot.MATRIX_SEND_MAX_RETRIES
 
     @pytest.mark.asyncio
     async def test_send_safe_success(self, mock_matrix_client, simple_issue):
