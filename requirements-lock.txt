@@ -1,3 +1,8 @@
+# Зафиксированный полный набор пакетов (pip freeze) для воспроизводимых сборок.
+# Использование: pip install -r requirements-lock.txt
+# Обновлять после изменения requirements.txt: pip freeze > requirements-lock.txt
+# (или только прямые зависимости + транзитивные — как принято в команде)
+
 aiofiles==24.1.0
 aiohappyeyeballs==2.6.1
 aiohttp==3.13.3

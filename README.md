@@ -8,7 +8,7 @@
 |-----|------------|
 | Запуск | **`python bot.py`** из корня репозитория (файл **`bot.py`**, не `src/bot.py`) |
 | Пользователи и маршруты | JSON в **`.env`**: `USERS`, `STATUS_ROOM_MAP`, `VERSION_ROOM_MAP` |
-| State | JSON **`state_<redmine_id>_*.json`** в каталоге проекта (рядом с `bot.py`) |
+| State | JSON **`data/state_<redmine_id>_*.json`** (каталог `data/` рядом с `bot.py`; при обновлении бота старые `state_*.json` из корня переносятся автоматически) |
 | Интервал опроса Redmine | По умолчанию **90 с** (`CHECK_INTERVAL` в `bot.py`) |
 | Matrix | Отправка через **`src/matrix_send.py`** (`room_send_with_retry`): до **3** попыток, паузы **1 с** и **2 с** |
 | `src/preferences.py` (DND / рабочие часы) | Модуль есть; **в `bot.py` не вызывается** — уведомления без этого фильтра |
@@ -76,7 +76,8 @@
 matrix_bot_firebeard/
 ├── bot.py                 # Точка входа: Redmine + Matrix + APScheduler
 ├── bot.log                # Лог (ротация в коде)
-├── state_<uid>_*.json     # Состояние по пользователям Redmine (рядом с bot.py)
+├── data/
+│   └── state_<uid>_*.json # Состояние по пользователям Redmine (основное хранилище)
 ├── requirements.txt
 ├── README.md
 ├── .env                   # Секреты — не коммитить

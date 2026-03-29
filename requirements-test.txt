@@ -1,2 +1,7 @@
+# Зависимости только для разработки и CI (pytest).
+# Не нужны на production-сервере с ботом.
+# Установка: pip install -r requirements-test.txt
+# (часто вместе с requirements.txt или requirements-lock.txt)
+
 pytest==9.0.2
 pytest-asyncio==1.3.0

@@ -1,5 +1,7 @@
 """
-Тесты для utils.py — чистые функции без внешних зависимостей.
+Тесты src/utils.py: даты, таймзона, plural_days, safe_html.
+
+Без сети и Redmine — быстрые unit-тесты на граничные значения и экранирование HTML.
 """
 
 from datetime import datetime, date

@@ -1,8 +1,11 @@
 """
-Matrix-клиент: подключение, отправка сообщений.
+Matrix-клиент: singleton AsyncClient и отправка HTML в комнаты.
 
-Обёртка над nio.AsyncClient. Отправка через matrix_send.room_send_with_retry.
-Использует access_token (без пароля).
+Обёртка над nio; отправка через matrix_send.room_send_with_retry.
+
+Когда использовать: код, импортируемый из src/ (тесты, будущие модули).
+Корневой bot.py создаёт AsyncClient сам и тоже зовёт room_send_with_retry —
+два входа, одна логика повторов в matrix_send.py.
 """
 
 import logging

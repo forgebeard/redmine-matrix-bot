@@ -1,6 +1,15 @@
 """
-Общая конфигурация тестов.
-Добавляет src/ в sys.path + общие фикстуры и моки.
+Общая конфигурация тестов (фикстуры для pytest).
+
+Что делает:
+  - Добавляет каталог src/ в sys.path, чтобы импортировать модули проекта
+    (config, utils, matrix_client, …) так же, как в проде через pytest.
+  - Даёт моки Redmine: MockIssue (задача), MockJournal (запись журнала) —
+    без HTTP к реальному Redmine.
+  - mock_matrix_client — AsyncClient с успешным room_send (для тестов bot.py).
+
+Тесты корневого bot.py дополнительно импортируют bot из корня; этот файл
+обслуживает и src-тесты, и test_bot.py.
 """
 
 import sys

@@ -1,11 +1,14 @@
 """
-Тесты для matrix_client.py — с моками, без реального Matrix-сервера.
+Тесты src/matrix_client.py: singleton клиента и send_message.
+
+nio подменяется до импорта matrix_client/matrix_send — реального сервера нет.
+Проверяем retry и сборку content для m.room.message.
 """
 
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 
-# Мокаем nio ДО импорта matrix_client
+# Подмена nio до импорта: иначе matrix_send подтянет реальный пакет
 import sys
 mock_nio = MagicMock()
 mock_nio.RoomSendError = type("RoomSendError", (), {})

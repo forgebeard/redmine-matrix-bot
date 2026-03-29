@@ -2,6 +2,10 @@
 Единая отправка m.room.message в Matrix: повторы и экспоненциальный backoff.
 
 Используется и корневым bot.py (свой AsyncClient), и matrix_client (singleton).
+
+Ответ успешной отправки в nio обычно содержит event_id; ошибки — RoomSendError
+или ответ с status_code без event_id. В тестах nio подменяют, поэтому проверка
+не только через isinstance(RoomSendError).
 """
 
 import asyncio
