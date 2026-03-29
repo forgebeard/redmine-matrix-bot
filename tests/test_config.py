@@ -1,5 +1,8 @@
 """
-Тесты для config.py — валидация, парсинг, should_notify.
+Тесты модуля src/config.py (без запуска бота).
+
+Проверяем: validate_users, validate_required_env, should_notify — то, что
+нужно при старте, чтобы не падать на кривом USERS в .env.
 """
 
 import pytest

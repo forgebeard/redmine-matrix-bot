@@ -1,9 +1,14 @@
 """
-Тесты бота Redmine → Matrix.
+Тесты корневого bot.py (Redmine → Matrix).
 
-Запуск:
-  cd matrix_bot_firebeard
-  source venv/bin/activate
+Зачем отдельный файл: основная логика живёт в bot.py в корне репозитория;
+модули из src/ тестируются в test_config.py, test_utils.py и т.д.
+
+Перед импортом bot подставляются переменные окружения (минимальный .env),
+чтобы бот не падал на валидации при загрузке модуля.
+
+Запуск из корня проекта:
+  python -m pytest tests/test_bot.py -v
   python -m pytest tests/ -v
 """
 
@@ -17,7 +22,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-# Подставляем минимальный .env ДО импорта bot
+# Минимальный .env до import bot — иначе main() не вызывается, но константы валидируются при тестах
 os.environ.setdefault("MATRIX_HOMESERVER", "https://test.server")
 os.environ.setdefault("MATRIX_ACCESS_TOKEN", "test_token")
 os.environ.setdefault("MATRIX_USER_ID", "@bot:test.server")
@@ -28,13 +33,14 @@ os.environ.setdefault("BOT_TIMEZONE", "Europe/Moscow")
 os.environ.setdefault("USERS", '[{"redmine_id": 1972, "room": "!test:server", "notify": ["all"]}]')
 
 import bot
+import matrix_send
 from tests.conftest import MockIssue, MockJournal
 
 
 # ═══════════════════════════════════════════════════════════════════════════
 # 1. УТИЛИТЫ
 # ═══════════════════════════════════════════════════════════════════════════
-
+# Дублируют часть контракта src/utils.py, но тестируют функции из bot.py.
 
 class TestPluralDays:
     """Тесты склонения слова 'день'."""
@@ -132,7 +138,7 @@ class TestGetVersionName:
 # ═══════════════════════════════════════════════════════════════════════════
 # 2. ВАЛИДАЦИЯ КОНФИГУРАЦИИ
 # ═══════════════════════════════════════════════════════════════════════════
-
+# USERS из .env должен быть валидным до выхода в прод.
 
 class TestValidateUsers:
     """Тесты validate_users — защита от кривого конфига."""
@@ -194,7 +200,7 @@ class TestValidateUsers:
 # ═══════════════════════════════════════════════════════════════════════════
 # 3. STATE-ФАЙЛЫ
 # ═══════════════════════════════════════════════════════════════════════════
-
+# load_json/save_json в bot.py; пути теперь через data/ (см. test_state_file_path).
 
 class TestStateFiles:
     """Тесты чтения/записи JSON state-файлов."""
@@ -234,9 +240,10 @@ class TestStateFiles:
         assert loaded["задача"] == "Тест 🔥"
 
     def test_state_file_path(self):
-        """Проверяем формат имени файла."""
+        """State лежит в data/, не в корне репозитория."""
         path = bot.state_file(1972, "sent")
         assert path.name == "state_1972_sent.json"
+        assert path.parent == bot.data_dir()
 
     def test_load_empty_file(self, tmp_path):
         """Пустой файл → default."""
@@ -249,7 +256,7 @@ class TestStateFiles:
 # ═══════════════════════════════════════════════════════════════════════════
 # 4. ДЕТЕКТОРЫ ИЗМЕНЕНИЙ
 # ═══════════════════════════════════════════════════════════════════════════
-
+# Сравнение прошлого state с текущим ответом Redmine.
 
 class TestDetectStatusChange:
     """Тесты определения смены статуса."""
@@ -328,7 +335,7 @@ class TestDetectNewJournals:
 # ═══════════════════════════════════════════════════════════════════════════
 # 5. DESCRIBE_JOURNAL
 # ═══════════════════════════════════════════════════════════════════════════
-
+# Человекочитаемое описание записей журнала для issue_updated.
 
 class TestDescribeJournal:
     """Тесты описания записей журнала."""
@@ -413,7 +420,7 @@ class TestDescribeJournal:
 # ═══════════════════════════════════════════════════════════════════════════
 # 6. RESOLVE_FIELD_VALUE
 # ═══════════════════════════════════════════════════════════════════════════
-
+# ID статуса/приоритета → русские подписи из справочников в bot.py.
 
 class TestResolveFieldValue:
     """Тесты перевода ID в человекочитаемые имена."""
@@ -443,7 +450,7 @@ class TestResolveFieldValue:
 # ═══════════════════════════════════════════════════════════════════════════
 # 7. РОУТИНГ ПО КОМНАТАМ
 # ═══════════════════════════════════════════════════════════════════════════
-
+# Дополнительные Matrix-комнаты по версии задачи и статусу РВ.
 
 class TestRouting:
     """Тесты маршрутизации уведомлений в доп. комнаты."""
@@ -491,7 +498,7 @@ class TestRouting:
 # ═══════════════════════════════════════════════════════════════════════════
 # 8. ОТПРАВКА MATRIX-СООБЩЕНИЙ
 # ═══════════════════════════════════════════════════════════════════════════
-
+# matrix_send.room_send_with_retry + HTML карточки задач.
 
 class TestRoomSendWithRetry:
     """Повторы отправки в Matrix (room_send_with_retry)."""
@@ -511,8 +518,8 @@ class TestRoomSendWithRetry:
         client = AsyncMock()
         client.room_send = AsyncMock(side_effect=[mock_err, mock_err, success])
 
-        with patch("bot.asyncio.sleep", new_callable=AsyncMock):
-            await bot.room_send_with_retry(
+        with patch("matrix_send.asyncio.sleep", new_callable=AsyncMock):
+            await matrix_send.room_send_with_retry(
                 client, "!room:server", {"msgtype": "m.text", "body": "x"}
             )
 
@@ -531,13 +538,13 @@ class TestRoomSendWithRetry:
         client = AsyncMock()
         client.room_send = AsyncMock(return_value=mock_err)
 
-        with patch("bot.asyncio.sleep", new_callable=AsyncMock):
+        with patch("matrix_send.asyncio.sleep", new_callable=AsyncMock):
             with pytest.raises(RuntimeError, match="Matrix room_send error"):
-                await bot.room_send_with_retry(
+                await matrix_send.room_send_with_retry(
                     client, "xroom:server", {"msgtype": "m.text", "body": "x"}
                 )
 
-        assert client.room_send.call_count == bot.MATRIX_SEND_MAX_RETRIES
+        assert client.room_send.call_count == matrix_send.MAX_RETRIES
 
     @pytest.mark.asyncio
     async def test_network_exception_retries_then_raises(self):
@@ -545,13 +552,13 @@ class TestRoomSendWithRetry:
         client = AsyncMock()
         client.room_send = AsyncMock(side_effect=OSError("connection reset"))
 
-        with patch("bot.asyncio.sleep", new_callable=AsyncMock):
+        with patch("matrix_send.asyncio.sleep", new_callable=AsyncMock):
             with pytest.raises(OSError, match="connection reset"):
-                await bot.room_send_with_retry(
+                await matrix_send.room_send_with_retry(
                     client, "!r:s", {"msgtype": "m.text", "body": "x"}
                 )
 
-        assert client.room_send.call_count == bot.MATRIX_SEND_MAX_RETRIES
+        assert client.room_send.call_count == matrix_send.MAX_RETRIES
 
 
 class TestSendMatrixMessage:
@@ -643,13 +650,13 @@ class TestSendMatrixMessage:
         client = AsyncMock()
         client.room_send = AsyncMock(return_value=mock_error)
 
-        with patch("bot.asyncio.sleep", new_callable=AsyncMock):
+        with patch("matrix_send.asyncio.sleep", new_callable=AsyncMock):
             with pytest.raises(RuntimeError, match="Matrix room_send error"):
                 await bot.send_matrix_message(
                     client, simple_issue, "xroom:server", "new"
                 )
 
-        assert client.room_send.call_count == bot.MATRIX_SEND_MAX_RETRIES
+        assert client.room_send.call_count == matrix_send.MAX_RETRIES
 
 
 class TestSendSafe:
@@ -660,10 +667,10 @@ class TestSendSafe:
         """send_safe НЕ пробрасывает исключения — логирует."""
         client = AsyncMock()
         client.room_send = AsyncMock(side_effect=Exception("Network error"))
-        with patch("bot.asyncio.sleep", new_callable=AsyncMock):
+        with patch("matrix_send.asyncio.sleep", new_callable=AsyncMock):
             # Не должен кинуть исключение (несколько попыток room_send)
             await bot.send_safe(client, simple_issue, "!room:server", "new")
-        assert client.room_send.call_count == bot.MATRIX_SEND_MAX_RETRIES
+        assert client.room_send.call_count == matrix_send.MAX_RETRIES
 
     @pytest.mark.asyncio
     async def test_send_safe_success(self, mock_matrix_client, simple_issue):
@@ -675,7 +682,7 @@ class TestSendSafe:
 # ═══════════════════════════════════════════════════════════════════════════
 # 9. NOTIFICATION_TYPES — все типы имеют эмодзи и заголовок
 # ═══════════════════════════════════════════════════════════════════════════
-
+# Регрессия: новый тип уведомления не забыт в словаре.
 
 class TestNotificationTypes:
     """Проверяем что все типы уведомлений корректно определены."""
@@ -694,7 +701,7 @@ class TestNotificationTypes:
 # ═══════════════════════════════════════════════════════════════════════════
 # 10. СТРЕСС-ТЕСТЫ / ГРАНИЧНЫЕ СЛУЧАИ
 # ═══════════════════════════════════════════════════════════════════════════
-
+# Много журналов, битые поля, глубокий JSON в save_json.
 
 class TestEdgeCases:
     """Тесты граничных случаев, которые могут сломать бота."""
@@ -784,7 +791,7 @@ class TestEdgeCases:
 # ═══════════════════════════════════════════════════════════════════════════
 # 11. OVERDUE FIX-2: СРАВНЕНИЕ ПО ДАТЕ
 # ═══════════════════════════════════════════════════════════════════════════
-
+# Ежедневное напоминание о просрочке — по календарной дате, не по 24 ч.
 
 class TestOverdueDateComparison:
     """
@@ -832,36 +839,45 @@ class TestOverdueDateComparison:
 # ═══════════════════════════════════════════════════════════════════════════
 # 12. МИГРАЦИЯ СТАРЫХ STATE-ФАЙЛОВ
 # ═══════════════════════════════════════════════════════════════════════════
-
+# Старые имена файлов и перенос state_*.json из корня в data/.
 
 class TestMigration:
-    """Тесты миграции старых state-файлов."""
+    """Тесты миграции старых state-файлов и переноса state_*.json в data/."""
+
+    def test_migrate_state_from_root_to_data(self, tmp_path):
+        """state_*.json из корня (tmp) переносится в tmp/data/."""
+        root_state = tmp_path / "state_1972_sent.json"
+        root_state.write_text('{"1": {}}', encoding="utf-8")
+        with patch.object(bot, "BASE_DIR", tmp_path):
+            bot.migrate_state_from_root_to_data()
+        dest = tmp_path / "data" / "state_1972_sent.json"
+        assert dest.exists()
+        assert not root_state.exists()
 
     def test_migrate_old_files(self, tmp_path):
-        """Старые файлы переносятся в новый формат."""
-        # Подменяем BASE_DIR на tmp
+        """Старые sent_issues.json переносятся в data/state_<uid>_sent.json."""
         with patch.object(bot, "BASE_DIR", tmp_path):
             with patch.object(bot, "USERS", [{"redmine_id": 1972, "room": "!r:s"}]):
-                # Создаём старый файл
                 old_file = tmp_path / "sent_issues.json"
                 old_data = {"100": {"status": "Новая"}}
                 old_file.write_text(json.dumps(old_data), encoding="utf-8")
 
                 bot.migrate_old_state()
 
-                new_file = tmp_path / "state_1972_sent.json"
+                new_file = tmp_path / "data" / "state_1972_sent.json"
                 assert new_file.exists()
                 loaded = json.loads(new_file.read_text(encoding="utf-8"))
                 assert loaded == old_data
 
     def test_no_migration_if_new_exists(self, tmp_path):
-        """Если новый файл уже есть — не перезаписываем."""
+        """Если новый файл уже есть в data/ — не перезаписываем."""
         with patch.object(bot, "BASE_DIR", tmp_path):
             with patch.object(bot, "USERS", [{"redmine_id": 1972, "room": "!r:s"}]):
                 old_file = tmp_path / "sent_issues.json"
                 old_file.write_text('{"old": true}', encoding="utf-8")
 
-                new_file = tmp_path / "state_1972_sent.json"
+                (tmp_path / "data").mkdir(parents=True, exist_ok=True)
+                new_file = tmp_path / "data" / "state_1972_sent.json"
                 new_file.write_text('{"new": true}', encoding="utf-8")
 
                 bot.migrate_old_state()

@@ -1,5 +1,7 @@
 """
-Тесты для state.py — чтение/запись JSON, атомарность, state_file пути.
+Тесты src/state.py: пути к data/state_*.json, load_json, save_json.
+
+Повторяют контракт корневого bot.py для state (тот же формат файлов в data/).
 """
 
 import json

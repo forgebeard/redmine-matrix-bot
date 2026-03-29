@@ -1,5 +1,7 @@
 """
-Тесты для preferences.py — рабочие часы, DND, can_notify.
+Тесты src/preferences.py: рабочие часы, выходные, DND, can_notify.
+
+Модуль пока не подключён к bot.py — тесты фиксируют желаемое поведение на будущее.
 """
 
 from datetime import datetime, time

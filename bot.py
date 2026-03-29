@@ -38,9 +38,10 @@ _SRC_DIR = Path(__file__).resolve().parent / "src"
 if str(_SRC_DIR) not in sys.path:
     sys.path.insert(0, str(_SRC_DIR))
 from utils import safe_html
+from matrix_send import room_send_with_retry, MAX_RETRIES
 
 from dotenv import load_dotenv
-from nio import AsyncClient, RoomSendError
+from nio import AsyncClient
 from redminelib import Redmine
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
@@ -99,9 +100,8 @@ CHECK_INTERVAL = 90  # FIX-4: увеличен с 30 (цикл занимает 
 # Через сколько секунд напоминать о «Информация предоставлена»
 REMINDER_AFTER = 3600
 
-# Matrix: повторы при временных сбоях (см. src/matrix_client.py)
-MATRIX_SEND_MAX_RETRIES = 3
-MATRIX_SEND_RETRY_BASE_SEC = 1.0
+# Обратная совместимость тестов (реальные константы — в matrix_send.py)
+MATRIX_SEND_MAX_RETRIES = MAX_RETRIES
 
 # --- Статусы Redmine ---
 STATUS_NEW           = "Новая"
@@ -143,12 +143,22 @@ logger.addHandler(_ch)
 # ═══════════════════════════════════════════════════════════════════════════
 
 
+def data_dir() -> Path:
+    """
+    Каталог для JSON state (data/ рядом с bot.py, не корень репозитория).
+
+    Функция, а не константа: в тестах подменяют bot.BASE_DIR — путь остаётся согласованным.
+    """
+    return BASE_DIR / "data"
+
+
 def state_file(user_id, name):
     """
     Путь к state-файлу пользователя.
-    Пример: state_1972_sent.json, state_3254_journals.json
+
+    Имена: state_<redmine_id>_sent.json, state_<id>_journals.json и т.д.
     """
-    return BASE_DIR / f"state_{user_id}_{name}.json"
+    return data_dir() / f"state_{user_id}_{name}.json"
 
 
 def load_json(filepath, default=None):
@@ -166,6 +176,7 @@ def load_json(filepath, default=None):
 def save_json(filepath, data):
     """Атомарная запись JSON (через tmp-файл, потом rename)."""
     filepath = Path(filepath)
+    filepath.parent.mkdir(parents=True, exist_ok=True)
     tmp = filepath.with_suffix(".tmp")
     try:
         with open(tmp, "w", encoding="utf-8") as f:
@@ -310,51 +321,6 @@ NOTIFICATION_TYPES = {
     "issue_updated": ("📝", "Задача обновлена"),
     "reopened":      ("🔁", "Открыто повторно"),
 }
-
-
-async def room_send_with_retry(client, room_id, content):
-    """
-    Отправка m.room.message с повторными попытками и экспоненциальной паузой.
-
-    При ошибке (RoomSendError, исключение сети) логирует warning и повторяет
-    до MATRIX_SEND_MAX_RETRIES раз. После исчерпания попыток пробрасывает
-    последнюю ошибку.
-    """
-    last_err = None
-
-    for attempt in range(1, MATRIX_SEND_MAX_RETRIES + 1):
-        try:
-            resp = await client.room_send(
-                room_id=room_id, message_type="m.room.message", content=content
-            )
-            if isinstance(resp, RoomSendError):
-                last_err = RuntimeError(
-                    f"Matrix room_send error: {resp.message} "
-                    f"(status_code={resp.status_code}, room={room_id})"
-                )
-            else:
-                return resp
-        except Exception as e:
-            last_err = e
-
-        if attempt >= MATRIX_SEND_MAX_RETRIES:
-            break
-
-        delay = MATRIX_SEND_RETRY_BASE_SEC * (2 ** (attempt - 1))
-        logger.warning(
-            "Matrix send failed (%s/%s): %s; retry in %.1fs",
-            attempt,
-            MATRIX_SEND_MAX_RETRIES,
-            last_err,
-            delay,
-        )
-        await asyncio.sleep(delay)
-
-    if last_err is not None:
-        raise last_err
-    raise RuntimeError(
-        f"Matrix room_send failed after {MATRIX_SEND_MAX_RETRIES} attempts (room={room_id})"
-    )
 
 
 async def send_matrix_message(client, issue, room_id, notification_type="info", extra_text=""):
@@ -595,6 +561,9 @@ async def check_user_issues(client, redmine, user_cfg):
     """
     Проверяет все открытые задачи одного пользователя.
     Определяет что изменилось и рассылает уведомления.
+
+    Состояние между циклами — JSON в data/ (state_file): иначе после рестарта
+    пришлось бы заново «проглатывать» историю или слать дубликаты.
     """
     uid  = user_cfg["redmine_id"]
     room = user_cfg["room"]
@@ -882,6 +851,30 @@ async def cleanup_state_files(redmine):
 # ═══════════════════════════════════════════════════════════════════════════
 
 
+def migrate_state_from_root_to_data():
+    """
+    Переносит state_*.json из корня репозитория в data/ (если в data/ ещё нет такого файла).
+
+    Нужна при переходе с хранения state в корне на каталог data/. Дубликаты в корне
+    при уже существующем файле в data/ только логируются — не удаляем автоматически.
+    """
+    data_dir().mkdir(parents=True, exist_ok=True)
+    for p in sorted(BASE_DIR.glob("state_*.json")):
+        dest = data_dir() / p.name
+        if dest.exists():
+            logger.warning(
+                "⚠️ %s уже есть в data/ — файл в корне не трогаем (%s). При необходимости удалите дубликат вручную.",
+                p.name,
+                p,
+            )
+            continue
+        try:
+            p.rename(dest)
+            logger.info("📦 State перенесён в data/: %s", p.name)
+        except OSError as e:
+            logger.error("❌ Не удалось перенести %s в data/: %s", p.name, e)
+
+
 def migrate_old_state():
     """
     Переносит старые state-файлы (до мультипользовательской версии)
@@ -898,8 +891,12 @@ def migrate_old_state():
         "journals.json":       "journals",
     }
 
+    data_dir().mkdir(parents=True, exist_ok=True)
     for old_name, new_name in old_files.items():
+        # Старые имена могли лежать в корне или уже в data/
         old_path = BASE_DIR / old_name
+        if not old_path.exists():
+            old_path = data_dir() / old_name
         new_path = state_file(first_uid, new_name)
         if old_path.exists() and not new_path.exists():
             data = load_json(old_path)
@@ -943,7 +940,8 @@ async def main():
         for k, r in VERSION_ROOM_MAP.items():
             logger.info(f"   📦 Версия «{k}» → {r[:30]}...")
 
-    # --- Миграция старых файлов ---
+    # --- Миграции state: корень → data/, затем старые имена sent_issues.json → state_<uid>_*.json ---
+    migrate_state_from_root_to_data()
     migrate_old_state()
 
     # --- Подключение к Matrix ---
