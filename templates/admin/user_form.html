@@ -3,34 +3,42 @@
 {% block content %}
 <h1>{{ title }}</h1>
 <div class="card">
-<form method="post" action="{% if u %}/users/{{ u.id }}{% else %}/users{% endif %}">
+<form class="form" method="post" action="{% if u %}/users/{{ u.id }}{% else %}/users{% endif %}">
   <input type="hidden" name="csrf_token" value="{{ request.state._state.get('csrf_token', '') }}"/>
-  <label for="display_name">Имя (как показывать в панели)</label>
-  <input type="text" id="display_name" name="display_name"
-    value="{{ u.display_name if u and u.display_name else '' }}" placeholder="Иван Петров"/>
-  <label for="department">Отдел</label>
-  <input type="text" id="department" name="department"
-    value="{{ u.department if u and u.department else '' }}" placeholder="Сопровождение"/>
+  <div class="field">
+    <label for="display_name">Имя (как показывать в панели)</label>
+    <input type="text" id="display_name" name="display_name"
+      value="{{ u.display_name if u and u.display_name else '' }}" placeholder="Иван Петров"/>
+  </div>
+  <div class="field">
+    <label for="department">Отдел</label>
+    <input type="text" id="department" name="department"
+      value="{{ u.department if u and u.department else '' }}" placeholder="Сопровождение"/>
+  </div>
 
-  <label for="redmine_id">Redmine user ID</label>
-  <input type="number" id="redmine_id" name="redmine_id" required
-    value="{{ u.redmine_id if u else '' }}"/>
+  <div class="field">
+    <label for="redmine_id">Redmine user ID</label>
+    <input type="number" id="redmine_id" name="redmine_id" required
+      value="{{ u.redmine_id if u else '' }}"/>
+  </div>
 
-  <label for="redmine_search_q">Поиск в Redmine (имя/логин)</label>
-  <input
-    type="text"
-    id="redmine_search_q"
-    name="q"
-    placeholder="Начните ввод…"
-    hx-get="/redmine/users/search"
-    hx-trigger="keyup changed delay:400ms"
-    hx-target="#redmine_search_select"
-    hx-swap="innerHTML"
-    autocomplete="off"
-  />
-  <select id="redmine_search_select" size="6">
-    <option value="">Введите запрос</option>
-  </select>
+  <div class="field">
+    <label for="redmine_search_q">Поиск в Redmine (имя/логин)</label>
+    <input
+      type="text"
+      id="redmine_search_q"
+      name="q"
+      placeholder="Начните ввод…"
+      hx-get="/redmine/users/search"
+      hx-trigger="keyup changed delay:400ms"
+      hx-target="#redmine_search_select"
+      hx-swap="innerHTML"
+      autocomplete="off"
+    />
+    <select id="redmine_search_select" size="6">
+      <option value="">Введите запрос</option>
+    </select>
+  </div>
 
   <script>
     document.addEventListener('DOMContentLoaded', function () {
@@ -50,56 +58,61 @@
     });
   </script>
 
-  <label for="room">Matrix room ID</label>
-  <input type="text" id="room" name="room" required
-    value="{{ u.room if u else '' }}" placeholder="!xxx:server"/>
+  <div class="field">
+    <label for="room">Matrix room ID</label>
+    <input type="text" id="room" name="room" required
+      value="{{ u.room if u else '' }}" placeholder="!xxx:server"/>
+  </div>
 
-  <fieldset style="margin-top:1rem;">
+  <fieldset>
     <legend>Типы уведомлений</legend>
-    <label><input type="radio" name="notify_preset" value="all" {% if notify_preset == "all" %}checked{% endif %}/> Все уведомления</label>
-    <label><input type="radio" name="notify_preset" value="new_only" {% if notify_preset == "new_only" %}checked{% endif %}/> Только новые задачи</label>
-    <label><input type="radio" name="notify_preset" value="overdue_only" {% if notify_preset == "overdue_only" %}checked{% endif %}/> Только просроченные</label>
-    <label><input type="radio" name="notify_preset" value="custom" {% if notify_preset == "custom" %}checked{% endif %}/> Кастомный набор</label>
-    <div id="notify_custom_box" style="margin-top:.5rem; padding:.5rem; border:1px solid var(--border); border-radius:.5rem;">
-      <span class="muted">В расширенном режиме выберите типы:</span>
-      <div style="display:flex; flex-wrap:wrap; gap:.75rem; margin-top:.5rem;">
+    <label class="choice"><input type="radio" name="notify_preset" value="all" {% if notify_preset == "all" %}checked{% endif %}/> Все уведомления</label>
+    <label class="choice"><input type="radio" name="notify_preset" value="new_only" {% if notify_preset == "new_only" %}checked{% endif %}/> Только новые задачи</label>
+    <label class="choice"><input type="radio" name="notify_preset" value="overdue_only" {% if notify_preset == "overdue_only" %}checked{% endif %}/> Только просроченные</label>
+    <label class="choice"><input type="radio" name="notify_preset" value="custom" {% if notify_preset == "custom" %}checked{% endif %}/> Кастомный набор</label>
+    <div id="notify_custom_box" class="sub-panel">
+      <span class="field-hint">В расширенном режиме выберите типы:</span>
+      <div class="choice-grid">
         {% for key, label in [
           ("new", "Новая задача"), ("info", "Информация предоставлена"), ("reminder", "Напоминание"),
           ("overdue", "Просроченная"), ("status_change", "Смена статуса"), ("issue_updated", "Обновление"), ("reopened", "Переоткрыта")
         ] %}
-          <label style="margin:0;"><input type="checkbox" name="notify_values" value="{{ key }}" {% if key in notify_selected %}checked{% endif %}/> {{ label }}</label>
+          <label class="choice"><input type="checkbox" name="notify_values" value="{{ key }}" {% if key in notify_selected %}checked{% endif %}/> {{ label }}</label>
         {% endfor %}
       </div>
       <input type="hidden" name="notify_json" value="{{ notify_json }}"/>
     </div>
   </fieldset>
 
-  <label for="work_hours_from">Рабочие часы</label>
-  <div style="display:flex; gap:.5rem; align-items:center;">
-    <input type="time" id="work_hours_from" name="work_hours_from" value="{% if u and u.work_hours and '-' in u.work_hours %}{{ u.work_hours.split('-')[0] }}{% endif %}"/>
-    <span>—</span>
-    <input type="time" id="work_hours_to" name="work_hours_to" value="{% if u and u.work_hours and '-' in u.work_hours %}{{ u.work_hours.split('-')[1] }}{% endif %}"/>
+  <div class="field">
+    <label for="work_hours_from">Рабочие часы</label>
+    <div class="inline-range">
+      <input type="time" id="work_hours_from" name="work_hours_from" value="{% if u and u.work_hours and '-' in u.work_hours %}{{ u.work_hours.split('-')[0] }}{% endif %}"/>
+      <span class="sep">—</span>
+      <input type="time" id="work_hours_to" name="work_hours_to" value="{% if u and u.work_hours and '-' in u.work_hours %}{{ u.work_hours.split('-')[1] }}{% endif %}"/>
+    </div>
   </div>
 
-  <fieldset style="margin-top:1rem;">
+  <fieldset>
     <legend>Рабочие дни</legend>
-    <div style="display:flex; flex-wrap:wrap; gap:.75rem;">
+    <div class="choice-grid">
       {% set _days = (u.work_days if u and u.work_days is not none else [0,1,2,3,4]) %}
       {% for idx, label in [(0,"Пн"),(1,"Вт"),(2,"Ср"),(3,"Чт"),(4,"Пт"),(5,"Сб"),(6,"Вс")] %}
-        <label style="margin:0;"><input type="checkbox" name="work_days_values" value="{{ idx }}" {% if idx in _days %}checked{% endif %}/> {{ label }}</label>
+        <label class="choice"><input type="checkbox" name="work_days_values" value="{{ idx }}" {% if idx in _days %}checked{% endif %}/> {{ label }}</label>
       {% endfor %}
     </div>
     <input type="hidden" name="work_days_json" value="{% if u and u.work_days is not none %}{{ u.work_days }}{% endif %}"/>
   </fieldset>
 
-  <label style="display:flex; align-items:center; gap:0.5rem; margin-top:1rem;">
-    <input type="checkbox" name="dnd" value="on" {% if u and u.dnd %}checked{% endif %}/>
-    DND (не беспокоить)
-  </label>
-  <p style="margin-top:1rem;">
+  <div class="field field-check">
+    <input type="checkbox" name="dnd" value="on" id="dnd" {% if u and u.dnd %}checked{% endif %}/>
+    <label for="dnd">DND (не беспокоить)</label>
+  </div>
+
+  <div class="page-actions">
     <button type="submit" class="btn btn-primary">Сохранить</button>
     <a class="btn btn-ghost" href="/users">Отмена</a>
-  </p>
+  </div>
 </form>
 </div>
 <script>

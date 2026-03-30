@@ -8,37 +8,45 @@
   {% if missing %}
   <p class="muted">Ещё не заполнено: <code>{{ missing|join(", ") }}</code></p>
   {% endif %}
-  <form method="post" action="/onboarding/save" class="stack" style="margin-top:1rem;">
+  <form class="form" method="post" action="/onboarding/save" style="margin-top:1rem;">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}"/>
-    <div class="card card-nested" style="padding:.85rem;">
+    <div class="card card-nested stack">
       <h2 style="margin-top:0;">Redmine</h2>
-      <label for="secret_REDMINE_URL">Адрес Redmine</label>
-      <input id="secret_REDMINE_URL" name="secret_REDMINE_URL" type="text" placeholder="https://redmine.company.local"/>
-      <p class="muted">Нужен, чтобы читать задачи и статусы из Redmine.</p>
-      <label for="secret_REDMINE_API_KEY">API-ключ Redmine</label>
-      <input id="secret_REDMINE_API_KEY" name="secret_REDMINE_API_KEY" type="text" placeholder="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"/>
-      <p class="muted">Ключ сервисной учётки с доступом к проектам для мониторинга.</p>
+      <div class="field">
+        <label for="secret_REDMINE_URL">Адрес Redmine</label>
+        <input id="secret_REDMINE_URL" name="secret_REDMINE_URL" type="text" placeholder="https://redmine.company.local"/>
+        <p class="field-hint">Нужен, чтобы читать задачи и статусы из Redmine.</p>
+      </div>
+      <div class="field">
+        <label for="secret_REDMINE_API_KEY">API-ключ Redmine</label>
+        <input id="secret_REDMINE_API_KEY" name="secret_REDMINE_API_KEY" type="text" placeholder="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"/>
+        <p class="field-hint">Ключ сервисной учётки с доступом к проектам для мониторинга.</p>
+      </div>
     </div>
-    <div class="card card-nested" style="padding:.85rem;">
+    <div class="card card-nested stack">
       <h2 style="margin-top:0;">Matrix</h2>
-      <label for="secret_HOMESERVER">Адрес homeserver</label>
-      <input id="secret_HOMESERVER" name="secret_HOMESERVER" type="text" placeholder="https://matrix.company.local"/>
-      <p class="muted">Адрес Matrix-сервера, куда бот отправляет уведомления.</p>
-      <label for="secret_MATRIX_ACCESS_TOKEN">Токен Matrix</label>
-      <input id="secret_MATRIX_ACCESS_TOKEN" name="secret_MATRIX_ACCESS_TOKEN" type="text" placeholder="syt_xxxxxxxxxxxxxxxxxxx"/>
-      <p class="muted">Токен сервисной Matrix-учётки бота.</p>
+      <div class="field">
+        <label for="secret_HOMESERVER">Адрес homeserver</label>
+        <input id="secret_HOMESERVER" name="secret_HOMESERVER" type="text" placeholder="https://matrix.company.local"/>
+        <p class="field-hint">Адрес Matrix-сервера, куда бот отправляет уведомления.</p>
+      </div>
+      <div class="field">
+        <label for="secret_MATRIX_ACCESS_TOKEN">Токен Matrix</label>
+        <input id="secret_MATRIX_ACCESS_TOKEN" name="secret_MATRIX_ACCESS_TOKEN" type="text" placeholder="syt_xxxxxxxxxxxxxxxxxxx"/>
+        <p class="field-hint">Токен сервисной Matrix-учётки бота.</p>
+      </div>
     </div>
     {% for name in required_names if name not in ["REDMINE_URL", "REDMINE_API_KEY", "HOMESERVER", "MATRIX_ACCESS_TOKEN"] %}
-      <div>
+      <div class="field">
         <label for="secret_{{ name }}">{{ name }}</label>
         <input id="secret_{{ name }}" name="secret_{{ name }}" type="text" placeholder="Введите значение {{ name }}"/>
       </div>
     {% endfor %}
-    <div style="display:flex; gap:0.6rem; flex-wrap:wrap;">
+    <div class="page-actions">
       <button class="btn btn-primary" type="submit">Сохранить и продолжить</button>
     </div>
   </form>
-  <form method="post" action="/onboarding/skip" style="margin-top:1rem;">
+  <form class="form" method="post" action="/onboarding/skip" style="margin-top:1rem;">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}"/>
     <button class="btn btn-ghost" type="submit">Пропустить сейчас</button>
   </form>

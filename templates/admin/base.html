@@ -258,6 +258,10 @@
     .btn-danger:hover { background: rgba(248, 113, 113, 0.35); }
     .btn-ghost { background: rgba(255,255,255,0.06); color: var(--fg); border: 1px solid var(--border); }
     .btn-ghost:hover { background: rgba(255,255,255,0.1); }
+    .btn:focus-visible {
+      outline: 2px solid var(--cyan);
+      outline-offset: 2px;
+    }
     input, textarea, select {
       width: 100%; max-width: 44rem;
       padding: 0.55rem 0.75rem;
@@ -269,7 +273,81 @@
     input:focus, textarea:focus, select:focus {
       outline: none; border-color: var(--cyan); box-shadow: 0 0 0 3px var(--cyan-dim);
     }
-    label { display: block; margin-top: 0.75rem; font-weight: 500; font-size: 0.9rem; }
+    label { display: block; font-weight: 500; font-size: 0.9rem; }
+    /* Вертикальный ритм форм: без «плавающих» margin у label */
+    .form {
+      display: flex;
+      flex-direction: column;
+      gap: 1.125rem;
+    }
+    .form label { margin-top: 0; }
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+    }
+    .field > label:first-child { margin-top: 0; }
+    .field-hint {
+      margin: 0;
+      font-size: 0.85rem;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+    .inline-range {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.5rem 0.75rem;
+    }
+    .inline-range input[type="time"] {
+      width: auto;
+      min-width: 5.5rem;
+      flex: 1 1 auto;
+      max-width: 12rem;
+    }
+    .inline-range .sep { color: var(--muted); user-select: none; }
+    .choice-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.45rem 0.75rem;
+    }
+    label.choice {
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      gap: 0.5rem;
+      margin: 0;
+      font-weight: 400;
+      font-size: 0.9rem;
+    }
+    .field-check {
+      flex-direction: row;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .field-check label { margin: 0; font-weight: 400; font-size: 0.9rem; }
+    .sub-panel {
+      margin-top: 0.25rem;
+      padding: 0.65rem 0.85rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: rgba(0, 0, 0, 0.2);
+    }
+    .sub-panel .choice-grid { margin-top: 0.5rem; }
+    .form fieldset {
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+      margin: 0;
+    }
+    .form fieldset > legend {
+      margin-bottom: 0.15rem;
+    }
+    .form .page-actions { margin-top: 0; }
+    form:not(.form) > label,
+    .card form:not(.form) > label { margin-top: 0.75rem; }
+    form:not(.form) > label:first-of-type,
+    .card form:not(.form) > label:first-of-type { margin-top: 0; }
     .card {
       background: var(--glass);
       backdrop-filter: blur(12px);
@@ -333,6 +411,7 @@
     .stat-card .stat-icon { position: absolute; right: 1rem; top: 1rem; font-size: 1.75rem; opacity: 0.35; color: var(--cyan); }
     .page-actions { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; margin-top: 1rem; }
     .filter-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 0.75rem; align-items: end; }
+    .filter-row .page-actions { margin-top: 0; }
     @media (max-width: 640px) {
       .filter-row { grid-template-columns: 1fr; }
     }

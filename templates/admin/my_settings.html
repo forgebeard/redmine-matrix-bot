@@ -4,61 +4,65 @@
 <h1>Мои настройки</h1>
 
 <div class="card" style="margin-top:1rem;">
-  <p class="muted" style="margin-top:0;">
+  <p class="field-hint">
     Редактируйте расписание DND и правила уведомлений для вашей Redmine-учётки.
   </p>
-  <form method="post" action="/me/settings">
+  <form class="form" method="post" action="/me/settings">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}"/>
-    <label for="room">Комната Matrix</label>
-    <input type="text" id="room" name="room" readonly value="{{ room or '' }}" {% if not room %}placeholder="Не привязана"{% endif %} />
+    <div class="field">
+      <label for="room">Комната Matrix</label>
+      <input type="text" id="room" name="room" readonly value="{{ room or '' }}" {% if not room %}placeholder="Не привязана"{% endif %} />
+    </div>
 
-    <fieldset style="margin-top:1rem;">
+    <fieldset>
       <legend>Типы уведомлений</legend>
-      <label><input type="radio" name="notify_preset" value="all" {% if notify_preset == "all" %}checked{% endif %}/> Все уведомления</label>
-      <label><input type="radio" name="notify_preset" value="new_only" {% if notify_preset == "new_only" %}checked{% endif %}/> Только новые задачи</label>
-      <label><input type="radio" name="notify_preset" value="overdue_only" {% if notify_preset == "overdue_only" %}checked{% endif %}/> Только просроченные</label>
-      <label><input type="radio" name="notify_preset" value="custom" {% if notify_preset == "custom" %}checked{% endif %}/> Кастомный набор</label>
-      <div id="notify_custom_box" style="margin-top:.5rem; padding:.5rem; border:1px solid var(--border); border-radius:.5rem;">
-        <span class="muted">Расширенный режим: выберите нужные события.</span>
-        <div style="display:flex; flex-wrap:wrap; gap:.75rem; margin-top:.5rem;">
+      <label class="choice"><input type="radio" name="notify_preset" value="all" {% if notify_preset == "all" %}checked{% endif %}/> Все уведомления</label>
+      <label class="choice"><input type="radio" name="notify_preset" value="new_only" {% if notify_preset == "new_only" %}checked{% endif %}/> Только новые задачи</label>
+      <label class="choice"><input type="radio" name="notify_preset" value="overdue_only" {% if notify_preset == "overdue_only" %}checked{% endif %}/> Только просроченные</label>
+      <label class="choice"><input type="radio" name="notify_preset" value="custom" {% if notify_preset == "custom" %}checked{% endif %}/> Кастомный набор</label>
+      <div id="notify_custom_box" class="sub-panel">
+        <span class="field-hint">Расширенный режим: выберите нужные события.</span>
+        <div class="choice-grid">
           {% for key, label in [
             ("new", "Новая задача"), ("info", "Информация предоставлена"), ("reminder", "Напоминание"),
             ("overdue", "Просроченная"), ("status_change", "Смена статуса"), ("issue_updated", "Обновление"), ("reopened", "Переоткрыта")
           ] %}
-            <label style="margin:0;"><input type="checkbox" name="notify_values" value="{{ key }}" {% if key in notify_selected %}checked{% endif %}/> {{ label }}</label>
+            <label class="choice"><input type="checkbox" name="notify_values" value="{{ key }}" {% if key in notify_selected %}checked{% endif %}/> {{ label }}</label>
           {% endfor %}
         </div>
+        <input type="hidden" name="notify_json" value="{{ notify_json }}"/>
       </div>
-      <input type="hidden" name="notify_json" value="{{ notify_json }}"/>
     </fieldset>
 
-    <label for="work_hours_from">Рабочие часы</label>
-    <div style="display:flex; gap:.5rem; align-items:center;">
-      <input type="time" id="work_hours_from" name="work_hours_from" value="{{ work_hours_from or '' }}"/>
-      <span>—</span>
-      <input type="time" id="work_hours_to" name="work_hours_to" value="{{ work_hours_to or '' }}"/>
+    <div class="field">
+      <label for="work_hours_from">Рабочие часы</label>
+      <div class="inline-range">
+        <input type="time" id="work_hours_from" name="work_hours_from" value="{{ work_hours_from or '' }}"/>
+        <span class="sep">—</span>
+        <input type="time" id="work_hours_to" name="work_hours_to" value="{{ work_hours_to or '' }}"/>
+      </div>
     </div>
     <input type="hidden" name="work_hours" value="{{ work_hours or '' }}"/>
 
-    <fieldset style="margin-top:1rem;">
+    <fieldset>
       <legend>Рабочие дни</legend>
-      <div style="display:flex; flex-wrap:wrap; gap:.75rem;">
+      <div class="choice-grid">
         {% for idx, label in [(0,"Пн"),(1,"Вт"),(2,"Ср"),(3,"Чт"),(4,"Пт"),(5,"Сб"),(6,"Вс")] %}
-          <label style="margin:0;"><input type="checkbox" name="work_days_values" value="{{ idx }}" {% if idx in work_days_selected %}checked{% endif %}/> {{ label }}</label>
+          <label class="choice"><input type="checkbox" name="work_days_values" value="{{ idx }}" {% if idx in work_days_selected %}checked{% endif %}/> {{ label }}</label>
         {% endfor %}
       </div>
       <input type="hidden" name="work_days_json" value="{{ work_days_json }}"/>
     </fieldset>
 
-    <label style="display:flex; align-items:center; gap:0.5rem; margin-top:1rem;">
-      <input type="checkbox" name="dnd" value="on" {% if dnd %}checked{% endif %}/>
-      DND (не беспокоить)
-    </label>
+    <div class="field field-check">
+      <input type="checkbox" name="dnd" value="on" id="dnd" {% if dnd %}checked{% endif %}/>
+      <label for="dnd">DND (не беспокоить)</label>
+    </div>
 
-    <p style="margin-top:1rem;">
+    <div class="page-actions">
       <button type="submit" class="btn btn-primary">Сохранить</button>
       <a class="btn btn-ghost" href="/matrix/bind">Привязать/пере-привязать комнату</a>
-    </p>
+    </div>
   </form>
 </div>
 <script>
@@ -75,4 +79,3 @@
   })();
 </script>
 {% endblock %}
-

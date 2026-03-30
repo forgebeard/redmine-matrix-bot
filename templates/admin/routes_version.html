@@ -29,13 +29,19 @@
 
 <div class="card" style="margin-top:1.5rem;">
   <h2 style="margin-top:0;">Добавить</h2>
-  <form method="post" action="/routes/version">
+  <form class="form" method="post" action="/routes/version">
     <input type="hidden" name="csrf_token" value="{{ request.state._state.get('csrf_token', '') }}"/>
-    <label for="version_key">Ключ версии</label>
-    <input type="text" id="version_key" name="version_key" required placeholder="РЕД ОС"/>
-    <label for="room_id">Комната Matrix (room_id)</label>
-    <input type="text" id="room_id" name="room_id" required/>
-    <p class="page-actions"><button type="submit" class="btn btn-primary">Добавить</button></p>
+    <div class="field">
+      <label for="version_key">Ключ версии</label>
+      <input type="text" id="version_key" name="version_key" required placeholder="РЕД ОС"/>
+    </div>
+    <div class="field">
+      <label for="room_id">Комната Matrix (room_id)</label>
+      <input type="text" id="room_id" name="room_id" required/>
+    </div>
+    <div class="page-actions">
+      <button type="submit" class="btn btn-primary">Добавить</button>
+    </div>
   </form>
 </div>
 {% endblock %}

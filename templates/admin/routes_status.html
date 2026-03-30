@@ -11,26 +11,34 @@
 </div>
 {% endif %}
 
-<form method="get" action="/routes/status" class="card" style="margin-bottom:1rem;">
-  <label for="q">Поиск по статусу или комнате</label>
-  <input id="q" name="q" value="{{ q or '' }}" placeholder="Например: Ожидает проверки или !room:server"/>
-  <p class="page-actions">
+<form method="get" action="/routes/status" class="card form" style="margin-bottom:1rem;">
+  <div class="field">
+    <label for="q">Поиск по статусу или комнате</label>
+    <input id="q" name="q" value="{{ q or '' }}" placeholder="Например: Ожидает проверки или !room:server"/>
+  </div>
+  <div class="page-actions">
     <button type="submit" class="btn btn-primary">Найти</button>
     <a href="/routes/status" class="btn btn-ghost">Сбросить</a>
-  </p>
+  </div>
 </form>
 
 <div class="card" style="margin-bottom:1rem;">
   <h2 style="margin-top:0;">Быстрое добавление по комнате</h2>
   <p class="muted">Одна комната и список статусов через запятую или с новой строки.</p>
-  <form method="post" action="/routes/status/by-room">
+  <form class="form" method="post" action="/routes/status/by-room">
     <input type="hidden" name="csrf_token" value="{{ request.state._state.get('csrf_token', '') }}"/>
-    <label for="room_id_bulk">Комната Matrix (room_id)</label>
-    <input type="text" id="room_id_bulk" name="room_id" placeholder="!room:server" required/>
-    <label for="status_keys_bulk">Статусы</label>
-    <textarea id="status_keys_bulk" name="status_keys" rows="3" placeholder="Передано в работу, Ожидает проверки" required></textarea>
-    <p class="muted" id="bulk_preview">Предпросмотр: —</p>
-    <p class="page-actions"><button type="submit" class="btn btn-primary">Добавить статусы в комнату</button></p>
+    <div class="field">
+      <label for="room_id_bulk">Комната Matrix (room_id)</label>
+      <input type="text" id="room_id_bulk" name="room_id" placeholder="!room:server" required/>
+    </div>
+    <div class="field">
+      <label for="status_keys_bulk">Статусы</label>
+      <textarea id="status_keys_bulk" name="status_keys" rows="3" placeholder="Передано в работу, Ожидает проверки" required></textarea>
+    </div>
+    <p class="field-hint" id="bulk_preview">Предпросмотр: —</p>
+    <div class="page-actions">
+      <button type="submit" class="btn btn-primary">Добавить статусы в комнату</button>
+    </div>
   </form>
 </div>
 
@@ -74,13 +82,19 @@
 
 <div class="card" style="margin-top:1.5rem;">
   <h2 style="margin-top:0;">Добавить по одной строке</h2>
-  <form method="post" action="/routes/status">
+  <form class="form" method="post" action="/routes/status">
     <input type="hidden" name="csrf_token" value="{{ request.state._state.get('csrf_token', '') }}"/>
-    <label for="status_key">Имя статуса</label>
-    <input type="text" id="status_key" name="status_key" required/>
-    <label for="room_id">Комната Matrix (room_id)</label>
-    <input type="text" id="room_id" name="room_id" required/>
-    <p class="page-actions"><button type="submit" class="btn btn-primary">Добавить</button></p>
+    <div class="field">
+      <label for="status_key">Имя статуса</label>
+      <input type="text" id="status_key" name="status_key" required/>
+    </div>
+    <div class="field">
+      <label for="room_id">Комната Matrix (room_id)</label>
+      <input type="text" id="room_id" name="room_id" required/>
+    </div>
+    <div class="page-actions">
+      <button type="submit" class="btn btn-primary">Добавить</button>
+    </div>
   </form>
 </div>
 <script>

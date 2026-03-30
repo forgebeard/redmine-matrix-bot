@@ -6,13 +6,13 @@
 <p class="muted">Поиск, фильтры и группировка по отделам.</p>
 <p class="page-actions"><a class="btn btn-primary" href="/users/new"><i class="fa-solid fa-plus"></i> Добавить</a></p>
 
-<form method="get" action="/users" class="card" style="margin-bottom:1rem;">
+<form method="get" action="/users" class="card form" style="margin-bottom:1rem;">
   <div class="filter-row">
-    <div>
+    <div class="field">
       <label for="q">Поиск</label>
       <input id="q" name="q" value="{{ q or '' }}" placeholder="Имя, отдел, комната"/>
     </div>
-    <div>
+    <div class="field">
       <label for="department">Отдел</label>
       <select id="department" name="department">
         <option value="">Все отделы</option>
@@ -21,7 +21,7 @@
         {% endfor %}
       </select>
     </div>
-    <div class="page-actions" style="margin-top:1.5rem;">
+    <div class="page-actions">
       <button type="submit" class="btn btn-primary">Применить</button>
       <a class="btn btn-ghost" href="/users">Сбросить</a>
     </div>
