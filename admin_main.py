@@ -28,6 +28,7 @@ sys.path.insert(0, str(_ROOT / "src"))
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -74,6 +75,44 @@ _jinja_env = Environment(
 templates = Jinja2Templates(env=_jinja_env)
 
 app = FastAPI(title="Matrix bot control panel", version="0.1.0")
+
+_STATIC_ROOT = _ROOT / "static"
+if _STATIC_ROOT.is_dir():
+    app.mount("/static", StaticFiles(directory=str(_STATIC_ROOT)), name="static")
+
+
+def _admin_csp_value() -> str | None:
+    """
+    Content-Security-Policy для HTML-ответов.
+    ADMIN_CSP_POLICY — полная строка политики (приоритет).
+    ADMIN_ENABLE_CSP=1 — встроенная политика под текущие CDN (htmx, FA, Google Fonts)
+    и inline script/style (обработчики в шаблонах до выноса в .js).
+    """
+    explicit = (os.getenv("ADMIN_CSP_POLICY") or "").strip()
+    if explicit:
+        return explicit
+    if os.getenv("ADMIN_ENABLE_CSP", "").strip().lower() not in ("1", "true", "yes", "on"):
+        return None
+    return (
+        "default-src 'self'; "
+        "base-uri 'self'; "
+        "form-action 'self'; "
+        "frame-ancestors 'none'; "
+        "img-src 'self' data: https:; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; "
+        "script-src 'self' 'unsafe-inline' https://unpkg.com; "
+        "font-src 'self' https://fonts.gstatic.com data:; "
+        "connect-src 'self';"
+    )
+
+
+@app.middleware("http")
+async def _csp_middleware(request: Request, call_next):
+    response = await call_next(request)
+    csp = _admin_csp_value()
+    if csp:
+        response.headers["Content-Security-Policy"] = csp
+    return response
 
 SESSION_COOKIE_NAME = os.getenv("ADMIN_SESSION_COOKIE", "admin_session")
 CSRF_COOKIE_NAME = os.getenv("ADMIN_CSRF_COOKIE", "admin_csrf")

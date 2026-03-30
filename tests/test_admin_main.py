@@ -37,6 +37,26 @@ def test_login_page_ok(client: TestClient):
     assert "Email" in r.text
     assert "Пароль" in r.text
     assert "Забыли пароль?" in r.text
+    assert "/static/admin/css/auth.css" in r.text
+
+
+def test_static_admin_css_served(client: TestClient):
+    r = client.get("/static/admin/css/panel.css")
+    assert r.status_code == 200
+    assert "text/css" in (r.headers.get("content-type") or "")
+    assert b":root" in r.content
+
+
+def test_admin_csp_value_env(monkeypatch):
+    monkeypatch.delenv("ADMIN_CSP_POLICY", raising=False)
+    monkeypatch.delenv("ADMIN_ENABLE_CSP", raising=False)
+    assert admin_main._admin_csp_value() is None
+    monkeypatch.setenv("ADMIN_ENABLE_CSP", "1")
+    v = admin_main._admin_csp_value()
+    assert v is not None
+    assert "default-src" in v
+    monkeypatch.setenv("ADMIN_CSP_POLICY", "default-src 'none'")
+    assert admin_main._admin_csp_value() == "default-src 'none'"
 
 
 def test_notify_presets_helpers():

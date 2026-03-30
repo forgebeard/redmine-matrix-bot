@@ -52,6 +52,7 @@ COPY --chown=bot:bot bot.py .
 COPY --chown=bot:bot admin_main.py .
 COPY --chown=bot:bot src/ ./src/
 COPY --chown=bot:bot templates/ ./templates/
+COPY --chown=bot:bot static/ ./static/
 COPY --chown=bot:bot scripts/ ./scripts/
 COPY --chown=bot:bot alembic.ini .
 COPY --chown=bot:bot alembic/ ./alembic/
