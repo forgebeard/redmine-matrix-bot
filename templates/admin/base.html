@@ -197,6 +197,16 @@
       font-size: 0.88rem;
     }
     .dropdown a:hover { background: rgba(255,255,255,0.08); }
+    .dropdown a:focus { outline: none; }
+    .dropdown a:focus-visible {
+      outline: 2px solid var(--cyan);
+      outline-offset: 2px;
+      background: rgba(255,255,255,0.08);
+    }
+    .user-trigger:focus-visible {
+      outline: 2px solid var(--cyan);
+      outline-offset: 2px;
+    }
     .dropdown hr { border: none; border-top: 1px solid var(--border); margin: 0.35rem 0; }
     .main-content {
       flex: 1;
@@ -367,7 +377,7 @@
       </div>
       {% if _current_user %}
       <div class="user-menu-wrap" id="user-menu-wrap">
-        <div class="user-trigger" id="user-trigger" role="button" tabindex="0" aria-haspopup="true" aria-expanded="false">
+        <div class="user-trigger" id="user-trigger" role="button" tabindex="0" aria-haspopup="true" aria-expanded="false" aria-controls="user-dropdown">
           <div class="user-meta">
             <div class="name">{% if _current_user.role == 'admin' %}Администратор{% else %}Пользователь{% endif %}</div>
             <div class="email" title="{{ _current_user.email }}">{{ _current_user.email }}</div>
@@ -418,37 +428,97 @@
     });
     backdrop.addEventListener('click', closeSidebar);
   }
-  document.addEventListener('keydown', function (e) {
-    if (e.key === 'Escape') {
-      closeSidebar();
-      var d = document.getElementById('user-dropdown');
-      var w = document.getElementById('user-menu-wrap');
-      if (d) d.classList.remove('open');
-      if (w) { var t = document.getElementById('user-trigger'); if (t) t.setAttribute('aria-expanded', 'false'); }
-    }
-  });
-
   var ut = document.getElementById('user-trigger');
   var dd = document.getElementById('user-dropdown');
   var uw = document.getElementById('user-menu-wrap');
   if (ut && dd && uw) {
+    function menuItems() {
+      return Array.prototype.slice.call(dd.querySelectorAll('a[role="menuitem"]'));
+    }
+    function openUserMenu() {
+      dd.classList.add('open');
+      ut.setAttribute('aria-expanded', 'true');
+      var items = menuItems();
+      if (items.length) {
+        requestAnimationFrame(function () { items[0].focus(); });
+      }
+    }
+    function closeUserMenu(focusTrigger) {
+      dd.classList.remove('open');
+      ut.setAttribute('aria-expanded', 'false');
+      if (focusTrigger) ut.focus();
+    }
     function toggleUserMenu(e) {
       e.stopPropagation();
-      var open = dd.classList.toggle('open');
-      ut.setAttribute('aria-expanded', open ? 'true' : 'false');
+      if (dd.classList.contains('open')) {
+        closeUserMenu(true);
+      } else {
+        openUserMenu();
+      }
     }
+    document.addEventListener('keydown', function (e) {
+      if (e.key !== 'Escape') return;
+      if (dd.classList.contains('open')) {
+        e.preventDefault();
+        closeUserMenu(true);
+        return;
+      }
+      closeSidebar();
+    });
     ut.addEventListener('click', toggleUserMenu);
     ut.addEventListener('keydown', function (e) {
       if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault();
         toggleUserMenu(e);
+        return;
+      }
+      if (!dd.classList.contains('open')) {
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+          e.preventDefault();
+          openUserMenu();
+        }
+        return;
+      }
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        menuItems()[0].focus();
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        var its = menuItems();
+        if (its.length) its[its.length - 1].focus();
+      }
+    });
+    dd.addEventListener('keydown', function (e) {
+      var items = menuItems();
+      if (!items.length) return;
+      var i = items.indexOf(document.activeElement);
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        var next = i < 0 ? 0 : (i + 1) % items.length;
+        items[next].focus();
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        var prev = i < 0 ? items.length - 1 : (i - 1 + items.length) % items.length;
+        items[prev].focus();
+      } else if (e.key === 'Home') {
+        e.preventDefault();
+        items[0].focus();
+      } else if (e.key === 'End') {
+        e.preventDefault();
+        items[items.length - 1].focus();
       }
     });
     document.addEventListener('click', function () {
-      dd.classList.remove('open');
-      ut.setAttribute('aria-expanded', 'false');
+      if (!dd.classList.contains('open')) return;
+      var focusInside = dd.contains(document.activeElement);
+      closeUserMenu(false);
+      if (focusInside) ut.focus();
     });
     uw.addEventListener('click', function (e) { e.stopPropagation(); });
+  } else {
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') closeSidebar();
+    });
   }
 })();
 </script>
