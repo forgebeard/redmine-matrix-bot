@@ -24,6 +24,7 @@ Redmine → Matrix бот уведомлений.
 
 import asyncio
 import errno
+import json
 import re
 import logging
 import logging.handlers
@@ -91,6 +92,13 @@ def data_dir() -> Path:
     return BASE_DIR / "data"
 
 
+def runtime_status_file() -> Path:
+    raw = (os.getenv("BOT_RUNTIME_STATUS_FILE") or "").strip()
+    if raw:
+        return Path(raw)
+    return data_dir() / "runtime_status.json"
+
+
 # Интервал проверки Redmine (секунды); переопределение: CHECK_INTERVAL в .env
 def _parse_check_interval() -> int:
     raw = os.getenv("CHECK_INTERVAL", "90").strip()
@@ -120,6 +128,7 @@ BOT_INSTANCE_ID_UUID = uuid.UUID(_BOT_INSTANCE_ID_RAW) if _BOT_INSTANCE_ID_RAW e
 
 # Через сколько секунд напоминать о «Информация предоставлена»
 REMINDER_AFTER = 3600
+GROUP_REPEAT_SECONDS = int(os.getenv("GROUP_REPEAT_SECONDS", "1800").strip() or "1800")
 
 # Обратная совместимость тестов (реальные константы — в matrix_send.py)
 MATRIX_SEND_MAX_RETRIES = MAX_RETRIES
@@ -311,6 +320,25 @@ def get_extra_rooms_for_rv(issue):
             rooms.add(virt_room)
 
     return rooms
+
+
+def _group_member_rooms(user_cfg: dict) -> set[str]:
+    """Личные комнаты участников той же группы."""
+    gid = user_cfg.get("group_id")
+    if gid is None:
+        return set()
+    out: set[str] = set()
+    for u in USERS:
+        if u.get("group_id") != gid:
+            continue
+        r = (u.get("room") or "").strip()
+        if r:
+            out.add(r)
+    return out
+
+
+def _group_room(user_cfg: dict) -> str:
+    return (user_cfg.get("group_room") or "").strip()
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -631,9 +659,19 @@ async def check_user_issues(client, redmine, user_cfg, db_session):
             if issue.status.name == STATUS_NEW and iid not in sent:
                 if should_notify(user_cfg, "new"):
                     await send_safe(client, issue, user_cfg, room, "new")
+                    for personal_room in _group_member_rooms(user_cfg):
+                        if personal_room != room:
+                            await send_safe(client, issue, user_cfg, personal_room, "new")
+                    group_room = _group_room(user_cfg)
+                    if group_room:
+                        await send_safe(client, issue, user_cfg, group_room, "new")
                     for extra_room in get_extra_rooms_for_new(issue):
                         await send_safe(client, issue, user_cfg, extra_room, "new")
-                sent[iid] = {"notified_at": now.isoformat(), "status": STATUS_NEW}
+                sent[iid] = {
+                    "notified_at": now.isoformat(),
+                    "status": STATUS_NEW,
+                    "group_last_notified_at": now.isoformat(),
+                }
                 changed_sent.add(iid)
                 sent_ch = True
 
@@ -643,11 +681,34 @@ async def check_user_issues(client, redmine, user_cfg, db_session):
             elif issue.status.name == STATUS_RV and iid not in sent:
                 if should_notify(user_cfg, "new"):
                     await send_safe(client, issue, user_cfg, room, "new")
+                    for personal_room in _group_member_rooms(user_cfg):
+                        if personal_room != room:
+                            await send_safe(client, issue, user_cfg, personal_room, "new")
+                    group_room = _group_room(user_cfg)
+                    if group_room:
+                        await send_safe(client, issue, user_cfg, group_room, "new")
                     for extra_room in get_extra_rooms_for_rv(issue):
                         await send_safe(client, issue, user_cfg, extra_room, "new")
-                sent[iid] = {"notified_at": now.isoformat(), "status": STATUS_RV}
+                sent[iid] = {
+                    "notified_at": now.isoformat(),
+                    "status": STATUS_RV,
+                    "group_last_notified_at": now.isoformat(),
+                }
                 changed_sent.add(iid)
                 sent_ch = True
+            elif issue.status.name in (STATUS_NEW, STATUS_RV) and iid in sent:
+                group_room = _group_room(user_cfg)
+                if group_room:
+                    last_group = sent.get(iid, {}).get("group_last_notified_at")
+                    if last_group:
+                        elapsed_group = (now - ensure_tz(datetime.fromisoformat(last_group))).total_seconds()
+                    else:
+                        elapsed_group = GROUP_REPEAT_SECONDS + 1
+                    if elapsed_group >= GROUP_REPEAT_SECONDS:
+                        await send_safe(client, issue, user_cfg, group_room, "new")
+                        sent[iid]["group_last_notified_at"] = now.isoformat()
+                        changed_sent.add(iid)
+                        sent_ch = True
 
             # ══════════════════════════════════════════════════════
             # 4. ИНФОРМАЦИЯ ПРЕДОСТАВЛЕНА
@@ -784,6 +845,7 @@ async def check_all_users(client, redmine):
     session_factory = get_session_factory()
     lease_owner_id = BOT_INSTANCE_ID_UUID
     lease_ttl = BOT_LEASE_TTL_SECONDS
+    error_count = 0
 
     async with session_factory() as session:
         for user_cfg in USERS:
@@ -804,12 +866,24 @@ async def check_all_users(client, redmine):
                 await session.commit()
             except Exception as e:
                 logger.error("❌ DB-state цикл проверки user %s: %s", uid, e, exc_info=True)
+                error_count += 1
                 try:
                     await session.rollback()
                 except Exception:
                     pass
 
     elapsed = time.monotonic() - start
+    try:
+        status_path = runtime_status_file()
+        status_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "last_cycle_at": now_tz().isoformat(),
+            "last_cycle_duration_s": round(elapsed, 3),
+            "error_count": int(error_count),
+        }
+        status_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        logger.debug("Не удалось обновить runtime_status.json", exc_info=True)
     logger.info(f"✅ Проверка завершена за {elapsed:.1f}с")
     if elapsed > CHECK_INTERVAL * 0.8:
         logger.warning(

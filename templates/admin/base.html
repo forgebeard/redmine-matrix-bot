@@ -29,6 +29,7 @@
     </div>
     <nav class="sidebar-nav">
       <a class="nav-link {% if _path == '/' %}active{% endif %}" href="/"><i class="fa-solid fa-gauge-high"></i><span>Обзор</span></a>
+      <a class="nav-link {% if _path.startswith('/groups') %}active{% endif %}" href="/groups"><i class="fa-solid fa-layer-group"></i><span>Группы</span></a>
       <a class="nav-link {% if _path.startswith('/users') %}active{% endif %}" href="/users"><i class="fa-solid fa-users"></i><span>Пользователи</span></a>
       <a class="nav-link {% if _path.startswith('/routes') %}active{% endif %}" href="/routes/status"><i class="fa-solid fa-route"></i><span>Маршруты</span></a>
       <a class="nav-link {% if _path.startswith('/onboarding') or _path.startswith('/secrets') %}active{% endif %}" href="/onboarding"><i class="fa-solid fa-plug"></i><span>Интеграции</span></a>

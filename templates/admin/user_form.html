@@ -12,9 +12,13 @@
       value="{{ u.display_name if u and u.display_name else '' }}" placeholder="Иван Петров"/>
   </div>
   <div class="field">
-    <label for="department">Отдел</label>
-    <input type="text" id="department" name="department"
-      value="{{ u.department if u and u.department else '' }}" placeholder="Сопровождение"/>
+    <label for="group_id">Группа</label>
+    <select id="group_id" name="group_id">
+      <option value="">UNASSIGNED</option>
+      {% for g in groups %}
+      <option value="{{ g.id }}" {% if u and u.group_id == g.id %}selected{% endif %}>{{ g.name }}</option>
+      {% endfor %}
+    </select>
   </div>
 
   <div class="field">
@@ -36,6 +40,11 @@
       hx-swap="innerHTML"
       autocomplete="off"
     />
+    <button class="btn btn-ghost" type="button"
+      hx-get="/redmine/users/search"
+      hx-include="#redmine_search_q"
+      hx-target="#redmine_search_select"
+      hx-swap="innerHTML">Найти</button>
     <select id="redmine_search_select" size="6">
       <option value="">Введите запрос</option>
     </select>
@@ -92,6 +101,7 @@
       <span class="sep">—</span>
       <input type="time" id="work_hours_to" name="work_hours_to" value="{% if u and u.work_hours and '-' in u.work_hours %}{{ u.work_hours.split('-')[1] }}{% endif %}"/>
     </div>
+    <p class="field-hint">Таймзона для рабочих часов: <strong>{{ bot_tz }}</strong>.</p>
   </div>
 
   <fieldset>

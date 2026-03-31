@@ -15,6 +15,8 @@ import logging
 import os
 import sys
 import secrets
+import threading
+import time
 import uuid
 from collections import defaultdict, deque
 from pathlib import Path
@@ -38,12 +40,14 @@ from nio import AsyncClient
 from database.load_config import row_counts
 from database.models import (
     AppSecret,
-    BotSession,
+    BotOpsAudit,
     BotAppUser,
+    BotSession,
     BotUser,
-    PasswordResetToken,
     MatrixRoomBinding,
+    PasswordResetToken,
     StatusRoomRoute,
+    SupportGroup,
     VersionRoomRoute,
 )
 from database.session import get_session, get_session_factory
@@ -59,10 +63,8 @@ from security import (
     verify_password,
 )
 
-from redminelib import Redmine
-from redminelib.exceptions import BaseRedmineError
-
 from matrix_send import room_send_with_retry
+from ops.docker_control import DockerControlError, control_service, get_service_status
 
 _templates_dir = str(_ROOT / "templates" / "admin")
 # В некоторых наборах версий Jinja2/Starlette кэш шаблонов может приводить к TypeError
@@ -81,6 +83,7 @@ def _admin_asset_version() -> str:
 
 
 _jinja_env.globals["asset_version"] = _admin_asset_version
+_jinja_env.globals["bot_timezone"] = lambda: (os.getenv("BOT_TIMEZONE") or "Europe/Moscow")
 templates = Jinja2Templates(env=_jinja_env)
 
 app = FastAPI(title="Matrix bot control panel", version="0.1.0")
@@ -121,12 +124,17 @@ async def _csp_middleware(request: Request, call_next):
     csp = _admin_csp_value()
     if csp:
         response.headers["Content-Security-Policy"] = csp
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
     return response
 
 SESSION_COOKIE_NAME = os.getenv("ADMIN_SESSION_COOKIE", "admin_session")
 CSRF_COOKIE_NAME = os.getenv("ADMIN_CSRF_COOKIE", "admin_csrf")
 COOKIE_SECURE = os.getenv("COOKIE_SECURE", "0").strip().lower() in ("1", "true", "yes", "on")
 SETUP_PATH = "/setup"
+SESSION_IDLE_TIMEOUT_SECONDS = int(os.getenv("ADMIN_SESSION_IDLE_TIMEOUT", "1800"))
+RUNTIME_STATUS_FILE = os.getenv("BOT_RUNTIME_STATUS_FILE", "/app/data/runtime_status.json")
+GROUP_UNASSIGNED_NAME = "UNASSIGNED"
 
 AUTH_TOKEN_SALT = os.getenv("AUTH_TOKEN_SALT", "dev-token-salt")
 SESSION_TTL_SECONDS = int(os.getenv("SESSION_TTL_SECONDS", "86400"))
@@ -202,6 +210,35 @@ def _verify_csrf(request: Request, form_token: str = "") -> None:
         raise HTTPException(status_code=400, detail="Некорректный CSRF токен")
 
 
+async def _audit_op(
+    session: AsyncSession,
+    action: str,
+    status: str,
+    actor_email: str | None = None,
+    detail: str | None = None,
+) -> None:
+    row = BotOpsAudit(
+        actor_email=(actor_email or "").strip().lower() or None,
+        action=action,
+        status=status,
+        detail=(detail or "")[:2000] or None,
+    )
+    session.add(row)
+    logger.info(
+        json.dumps(
+            {
+                "level": "AUDIT",
+                "action": action,
+                "status": status,
+                "actor": actor_email or "",
+                "detail": detail or "",
+                "ts": _now_utc().isoformat(),
+            },
+            ensure_ascii=False,
+        )
+    )
+
+
 class _SimpleRateLimiter:
     """In-memory rate limiter (per process)."""
 
@@ -269,6 +306,43 @@ class _IntegrationStatusCache:
 
 
 _integration_status_cache = _IntegrationStatusCache()
+
+
+class _RedmineSearchBreaker:
+    """In-memory circuit breaker для поиска пользователей Redmine."""
+
+    def __init__(self):
+        self.failures = 0
+        self.cooldown_until_ts = 0.0
+
+    def blocked(self) -> bool:
+        return datetime.now().timestamp() < self.cooldown_until_ts
+
+    def on_success(self) -> None:
+        self.failures = 0
+        self.cooldown_until_ts = 0.0
+
+    def on_failure(self) -> None:
+        self.failures += 1
+        if self.failures >= 5:
+            self.cooldown_until_ts = datetime.now().timestamp() + 60
+
+
+_redmine_search_breaker = _RedmineSearchBreaker()
+
+
+_process_started_at = time.monotonic()
+
+
+def _runtime_status_from_file() -> dict:
+    p = Path(RUNTIME_STATUS_FILE)
+    if not p.exists():
+        return {}
+    try:
+        raw = json.loads(p.read_text(encoding="utf-8"))
+        return raw if isinstance(raw, dict) else {}
+    except Exception:
+        return {}
 
 
 async def _has_admin(session: AsyncSession, use_cache: bool = True) -> bool:
@@ -368,6 +442,11 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 if sess.session_version != getattr(user, "session_version", 1):
                     return RedirectResponse("/login", status_code=303)
 
+                # Sliding idle timeout: продлеваем активную сессию на каждый запрос.
+                sess.expires_at = now + timedelta(seconds=SESSION_IDLE_TIMEOUT_SECONDS)
+                await session.flush()
+                await session.commit()
+
                 request.state.current_user = user
                 request.state.integration_status = await _integration_status(session)
         except Exception:
@@ -390,12 +469,6 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
 REDMINE_URL = (os.getenv("REDMINE_URL") or "").strip()
 REDMINE_API_KEY = (os.getenv("REDMINE_API_KEY") or "").strip()
-
-
-def _redmine_client() -> Redmine | None:
-    if not REDMINE_URL or not REDMINE_API_KEY:
-        return None
-    return Redmine(REDMINE_URL, key=REDMINE_API_KEY)
 
 
 app.add_middleware(AuthMiddleware)
@@ -425,8 +498,11 @@ async def health_ready(session: AsyncSession = Depends(get_session)):
     try:
         await session.execute(select(BotAppUser.id).limit(1))
         load_master_key()
+        get_service_status()
     except SecurityError as e:
         raise HTTPException(status_code=503, detail=str(e))
+    except DockerControlError as e:
+        raise HTTPException(status_code=503, detail=f"runtime backend: {e}")
     except Exception:
         raise HTTPException(status_code=503, detail="service not ready")
     return {"status": "ready"}
@@ -845,6 +921,11 @@ async def index(
     if not user or getattr(user, "role", "") != "admin":
         raise HTTPException(403, "Только admin")
     nu, ns, nv = await row_counts(session)
+    runtime_file = _runtime_status_from_file()
+    try:
+        runtime_docker = get_service_status()
+    except DockerControlError as e:
+        runtime_docker = {"state": "error", "detail": str(e), "service": os.getenv("DOCKER_TARGET_SERVICE", "bot")}
     return templates.TemplateResponse(
         request,
         "index.html",
@@ -852,8 +933,90 @@ async def index(
             "users_count": nu,
             "status_routes_count": ns,
             "version_routes_count": nv,
+            "runtime_status": {
+                "uptime_s": int(time.monotonic() - _process_started_at),
+                "live": True,
+                "ready": True,
+                "cycle": runtime_file,
+                "docker": runtime_docker,
+            },
         },
     )
+
+
+def _restart_in_background(actor_email: str | None) -> None:
+    def _run() -> None:
+        time.sleep(1.5)
+        detail = ""
+        status = "ok"
+        try:
+            control_service("restart")
+            detail = "restart command accepted"
+        except Exception as e:  # noqa: BLE001
+            status = "error"
+            detail = str(e)
+
+        async def _persist() -> None:
+            factory = get_session_factory()
+            async with factory() as s:
+                await _audit_op(s, "BOT_RESTART", status, actor_email=actor_email, detail=detail)
+                await s.commit()
+
+        try:
+            asyncio.run(_persist())
+        except Exception:
+            logger.exception("failed to persist restart audit")
+
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+
+
+@app.post("/ops/bot/{action}")
+async def bot_ops_action(
+    request: Request,
+    action: str,
+    csrf_token: Annotated[str, Form()] = "",
+    session: AsyncSession = Depends(get_session),
+):
+    _verify_csrf(request, csrf_token)
+    current = getattr(request.state, "current_user", None)
+    if not current or getattr(current, "role", "") != "admin":
+        raise HTTPException(403, "Только admin")
+    ip = _client_ip(request)
+    if not _rate_limiter.hit(f"ops:{ip}:{current.email}", limit=12, window_seconds=60):
+        raise HTTPException(429, "Слишком много операций, попробуйте позже")
+
+    allowed = {"start", "stop", "restart"}
+    if action not in allowed:
+        raise HTTPException(400, "Недопустимое действие")
+    actor = current.email
+    if action == "restart":
+        await _audit_op(session, "BOT_RESTART", "accepted", actor_email=actor, detail="scheduled")
+        await session.commit()
+        _restart_in_background(actor)
+        return RedirectResponse("/?ops=restart_accepted", status_code=303)
+
+    try:
+        res = control_service(action)
+        await _audit_op(
+            session,
+            f"BOT_{action.upper()}",
+            "ok",
+            actor_email=actor,
+            detail=json.dumps(res, ensure_ascii=False),
+        )
+        await session.commit()
+        return RedirectResponse(f"/?ops={action}_ok", status_code=303)
+    except DockerControlError as e:
+        await _audit_op(
+            session,
+            f"BOT_{action.upper()}",
+            "error",
+            actor_email=actor,
+            detail=str(e),
+        )
+        await session.commit()
+        return RedirectResponse(f"/?ops={action}_error", status_code=303)
 
 
 @app.get("/secrets", response_class=HTMLResponse)
@@ -965,19 +1128,154 @@ async def app_user_reset_password_admin(
 # --- Пользователи ---
 
 
-@app.get("/users", response_class=HTMLResponse)
-async def users_list(
+@app.get("/groups", response_class=HTMLResponse)
+async def groups_list(
     request: Request,
     q: str = "",
-    department: str = "",
     session: AsyncSession = Depends(get_session),
 ):
     user = getattr(request.state, "current_user", None)
     if not user or getattr(user, "role", "") != "admin":
         raise HTTPException(403, "Только admin")
+    q = (q or "").strip()
+    stmt = select(SupportGroup)
+    if q:
+        like = f"%{q}%"
+        stmt = stmt.where(or_(SupportGroup.name.ilike(like), SupportGroup.room_id.ilike(like)))
+    stmt = stmt.order_by(SupportGroup.is_active.desc(), SupportGroup.name.asc())
+    rows = list((await session.execute(stmt)).scalars().all())
+    return templates.TemplateResponse(
+        request,
+        "groups_list.html",
+        {
+            "items": rows,
+            "q": q,
+        },
+    )
+
+
+@app.get("/groups/new", response_class=HTMLResponse)
+async def groups_new(
+    request: Request,
+):
+    user = getattr(request.state, "current_user", None)
+    if not user or getattr(user, "role", "") != "admin":
+        raise HTTPException(403, "Только admin")
+    return templates.TemplateResponse(
+        request,
+        "group_form.html",
+        {"title": "Новая группа", "g": None, "bot_tz": os.getenv("BOT_TIMEZONE", "Europe/Moscow")},
+    )
+
+
+@app.get("/groups/{group_id}/edit", response_class=HTMLResponse)
+async def groups_edit(
+    request: Request,
+    group_id: int,
+    session: AsyncSession = Depends(get_session),
+):
+    user = getattr(request.state, "current_user", None)
+    if not user or getattr(user, "role", "") != "admin":
+        raise HTTPException(403, "Только admin")
+    row = await session.get(SupportGroup, group_id)
+    if not row:
+        raise HTTPException(404, "Группа не найдена")
+    return templates.TemplateResponse(
+        request,
+        "group_form.html",
+        {"title": "Редактирование группы", "g": row, "bot_tz": os.getenv("BOT_TIMEZONE", "Europe/Moscow")},
+    )
+
+
+@app.post("/groups")
+async def groups_create(
+    request: Request,
+    name: Annotated[str, Form()],
+    room_id: Annotated[str, Form()] = "",
+    timezone_name: Annotated[str, Form()] = "",
+    is_active: Annotated[str, Form()] = "",
+    csrf_token: Annotated[str, Form()] = "",
+    session: AsyncSession = Depends(get_session),
+):
+    _verify_csrf(request, csrf_token)
+    user = getattr(request.state, "current_user", None)
+    if not user or getattr(user, "role", "") != "admin":
+        raise HTTPException(403, "Только admin")
+    n = (name or "").strip()
+    if not n:
+        raise HTTPException(400, "Название обязательно")
+    row = SupportGroup(
+        name=n,
+        room_id=(room_id or "").strip(),
+        timezone=(timezone_name or "").strip() or None,
+        is_active=is_active in ("1", "on", "true"),
+    )
+    session.add(row)
+    await session.flush()
+    return RedirectResponse("/groups", status_code=303)
+
+
+@app.post("/groups/{group_id}")
+async def groups_update(
+    request: Request,
+    group_id: int,
+    name: Annotated[str, Form()],
+    room_id: Annotated[str, Form()] = "",
+    timezone_name: Annotated[str, Form()] = "",
+    is_active: Annotated[str, Form()] = "",
+    csrf_token: Annotated[str, Form()] = "",
+    session: AsyncSession = Depends(get_session),
+):
+    _verify_csrf(request, csrf_token)
+    user = getattr(request.state, "current_user", None)
+    if not user or getattr(user, "role", "") != "admin":
+        raise HTTPException(403, "Только admin")
+    row = await session.get(SupportGroup, group_id)
+    if not row:
+        raise HTTPException(404, "Группа не найдена")
+    n = (name or "").strip()
+    if not n:
+        raise HTTPException(400, "Название обязательно")
+    row.name = n
+    row.room_id = (room_id or "").strip()
+    row.timezone = (timezone_name or "").strip() or None
+    row.is_active = is_active in ("1", "on", "true")
+    return RedirectResponse("/groups", status_code=303)
+
+
+@app.post("/groups/{group_id}/delete")
+async def groups_delete(
+    request: Request,
+    group_id: int,
+    csrf_token: Annotated[str, Form()] = "",
+    session: AsyncSession = Depends(get_session),
+):
+    _verify_csrf(request, csrf_token)
+    user = getattr(request.state, "current_user", None)
+    if not user or getattr(user, "role", "") != "admin":
+        raise HTTPException(403, "Только admin")
+    row = await session.get(SupportGroup, group_id)
+    if row:
+        await session.delete(row)
+    return RedirectResponse("/groups", status_code=303)
+
+
+@app.get("/users", response_class=HTMLResponse)
+async def users_list(
+    request: Request,
+    q: str = "",
+    group_id: int | None = None,
+    session: AsyncSession = Depends(get_session),
+):
+    user = getattr(request.state, "current_user", None)
+    if not user or getattr(user, "role", "") != "admin":
+        raise HTTPException(403, "Только admin")
+
+    groups_rows = list((await session.execute(select(SupportGroup).order_by(SupportGroup.name.asc()))).scalars().all())
+    groups_by_id = {g.id: g for g in groups_rows}
+
     stmt = select(BotUser)
     q = (q or "").strip()
-    department = (department or "").strip()
     if q:
         like = f"%{q}%"
         stmt = stmt.where(
@@ -987,34 +1285,46 @@ async def users_list(
                 BotUser.room.ilike(like),
             )
         )
-    if department:
-        stmt = stmt.where(BotUser.department == department)
-    stmt = stmt.order_by(BotUser.department.asc().nulls_last(), BotUser.display_name.asc().nulls_last(), BotUser.redmine_id)
-    r = await session.execute(stmt)
-    rows = list(r.scalars().all())
-    departments = sorted({d for d in (u.department for u in rows) if d})
+    if group_id is not None:
+        if group_id == -1:
+            stmt = stmt.where(BotUser.group_id.is_(None))
+        else:
+            stmt = stmt.where(BotUser.group_id == group_id)
+    stmt = stmt.order_by(BotUser.group_id.asc().nulls_last(), BotUser.display_name.asc().nulls_last(), BotUser.redmine_id)
+    rows = list((await session.execute(stmt)).scalars().all())
+
     grouped: dict[str, list[BotUser]] = {}
     for row in rows:
-        key = row.department or "Без отдела"
+        if row.group_id is None:
+            key = GROUP_UNASSIGNED_NAME
+        else:
+            key = groups_by_id.get(row.group_id).name if groups_by_id.get(row.group_id) else GROUP_UNASSIGNED_NAME
         grouped.setdefault(key, []).append(row)
+
     return templates.TemplateResponse(
         request,
         "users_list.html",
         {
             "users": rows,
             "grouped_users": grouped,
-            "departments": departments,
+            "groups": groups_rows,
+            "groups_by_id": groups_by_id,
             "q": q,
-            "department_filter": department,
+            "group_filter": group_id,
+            "group_unassigned_name": GROUP_UNASSIGNED_NAME,
         },
     )
 
 
 @app.get("/users/new", response_class=HTMLResponse)
-async def users_new(request: Request):
+async def users_new(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+):
     user = getattr(request.state, "current_user", None)
     if not user or getattr(user, "role", "") != "admin":
         raise HTTPException(403, "Только admin")
+    groups_rows = list((await session.execute(select(SupportGroup).order_by(SupportGroup.name.asc()))).scalars().all())
     return templates.TemplateResponse(
         request,
         "user_form.html",
@@ -1024,6 +1334,8 @@ async def users_new(request: Request):
             "notify_json": '["all"]',
             "notify_preset": "all",
             "notify_selected": ["all"],
+            "groups": groups_rows,
+            "bot_tz": os.getenv("BOT_TIMEZONE", "Europe/Moscow"),
         },
     )
 
@@ -1081,7 +1393,7 @@ async def users_create(
     redmine_id: Annotated[int, Form()],
     room: Annotated[str, Form()],
     display_name: Annotated[str, Form()] = "",
-    department: Annotated[str, Form()] = "",
+    group_id: Annotated[str, Form()] = "",
     notify_json: Annotated[str, Form()] = "",
     notify_preset: Annotated[str, Form()] = "all",
     notify_values: Annotated[list[str], Form()] = [],
@@ -1119,7 +1431,8 @@ async def users_create(
     row = BotUser(
         redmine_id=redmine_id,
         display_name=display_name.strip() or None,
-        department=department.strip() or None,
+        group_id=int(group_id) if str(group_id).isdigit() else None,
+        department=None,
         room=room.strip(),
         notify=notify,
         work_hours=wh,
@@ -1143,6 +1456,7 @@ async def users_edit(
     row = await session.get(BotUser, user_id)
     if not row:
         raise HTTPException(404)
+    groups_rows = list((await session.execute(select(SupportGroup).order_by(SupportGroup.name.asc()))).scalars().all())
     return templates.TemplateResponse(
         request,
         "user_form.html",
@@ -1152,6 +1466,8 @@ async def users_edit(
             "notify_json": json.dumps(row.notify, ensure_ascii=False),
             "notify_preset": _notify_preset(row.notify),
             "notify_selected": row.notify or ["all"],
+            "groups": groups_rows,
+            "bot_tz": os.getenv("BOT_TIMEZONE", "Europe/Moscow"),
         },
     )
 
@@ -1163,7 +1479,7 @@ async def users_update(
     redmine_id: Annotated[int, Form()],
     room: Annotated[str, Form()],
     display_name: Annotated[str, Form()] = "",
-    department: Annotated[str, Form()] = "",
+    group_id: Annotated[str, Form()] = "",
     notify_json: Annotated[str, Form()] = "",
     notify_preset: Annotated[str, Form()] = "all",
     notify_values: Annotated[list[str], Form()] = [],
@@ -1185,7 +1501,7 @@ async def users_update(
         raise HTTPException(404)
     row.redmine_id = redmine_id
     row.display_name = display_name.strip() or None
-    row.department = department.strip() or None
+    row.group_id = int(group_id) if str(group_id).isdigit() else None
     row.room = room.strip()
     if notify_preset == "all":
         row.notify = ["all"]
@@ -1248,38 +1564,54 @@ async def redmine_users_search(
         limit_i = 20
     limit_i = max(1, min(limit_i, 50))
 
-    if not q or not _redmine_client():
+    if not q:
         return HTMLResponse("")
 
     user = getattr(request.state, "current_user", None)
     if not user or getattr(user, "role", "") != "admin":
         raise HTTPException(403, "Только admin")
+    if _redmine_search_breaker.blocked():
+        logger.warning("Redmine search blocked due to cooldown")
+        return HTMLResponse('<option value="">Поиск временно недоступен (cooldown)</option>')
 
-    redmine = _redmine_client()
+    if not REDMINE_URL or not REDMINE_API_KEY:
+        return HTMLResponse('<option value="">Redmine не настроен (нет URL/API key)</option>')
 
-    def _do_search() -> list[dict]:
-        # python-redmine: redmine.user.filter(...params...) прокидывает фильтры в REST
-        # (для Redmine ожидается параметр `name` для поиска по логину/имени).
-        users = []
+    def _do_search() -> tuple[list[dict], str | None]:
+        from urllib.parse import urlencode
+        from urllib.request import Request, urlopen
+        from urllib.error import HTTPError, URLError
+
+        params = urlencode({"name": q, "limit": str(limit_i)})
+        url = f"{REDMINE_URL.rstrip('/')}/users.json?{params}"
+        req = Request(url, headers={"X-Redmine-API-Key": REDMINE_API_KEY})
         try:
-            res = redmine.user.filter(name=q, limit=limit_i)
-            users = list(res)
-        except BaseRedmineError:
-            users = []
+            with urlopen(req, timeout=5.0) as r:
+                payload = json.loads(r.read().decode("utf-8", errors="replace"))
+            items = payload.get("users") if isinstance(payload, dict) else []
+            return (items if isinstance(items, list) else [], None)
+        except HTTPError as e:
+            return [], f"http_{e.code}"
+        except URLError:
+            return [], "timeout"
         except Exception:
-            users = []
-        return users
+            return [], "error"
 
-    users = await asyncio.to_thread(_do_search)
+    users_raw, err = await asyncio.to_thread(_do_search)
+    if err:
+        _redmine_search_breaker.on_failure()
+        return HTMLResponse(f'<option value="">Ошибка поиска: {html_escape(err)}</option>')
+    _redmine_search_breaker.on_success()
+    users = users_raw
 
     opts: list[str] = []
     for u in users:
-        uid = getattr(u, "id", None)
+        uid = (u or {}).get("id") if isinstance(u, dict) else None
         if uid is None:
             continue
-        firstname = getattr(u, "firstname", "") or ""
-        lastname = getattr(u, "lastname", "") or ""
-        login = getattr(u, "login", "") or ""
+        firstname = (u or {}).get("firstname", "") if isinstance(u, dict) else ""
+        lastname = (u or {}).get("lastname", "") if isinstance(u, dict) else ""
+        login = (u or {}).get("login", "") if isinstance(u, dict) else ""
         label = " ".join([s for s in (firstname, lastname) if s]).strip()
         if not label:
             label = login or str(uid)
@@ -1288,6 +1620,8 @@ async def redmine_users_search(
             f'<option value="{int(uid)}" data-display-name="{html_escape(label)}">{html_escape(label)}'
             f'{(" (" + html_escape(login) + ")") if login else ""}</option>'
         )
+    if not opts:
+        return HTMLResponse('<option value="">Ничего не найдено</option>')
     return HTMLResponse("".join(opts))
 
 

@@ -36,4 +36,32 @@
     <a class="btn btn-ghost" href="/app-users"><i class="fa-solid fa-user-shield"></i> Аккаунты панели</a>
   </p>
 </div>
+
+<div class="card content-stack" style="margin-top:1.25rem;">
+  <h2 style="margin-top:0;">Состояние рантайма</h2>
+  <p class="muted">
+    Процесс uptime: <strong>{{ runtime_status.uptime_s }}с</strong>,
+    Docker service: <strong>{{ runtime_status.docker.service }}</strong>,
+    state: <strong>{{ runtime_status.docker.state }}</strong>.
+  </p>
+  {% set cycle = runtime_status.cycle or {} %}
+  <p class="muted">
+    Последний цикл: {{ cycle.last_cycle_at or "—" }}; длительность: {{ cycle.last_cycle_duration_s or "—" }}с;
+    ошибок: {{ cycle.error_count or 0 }}.
+  </p>
+  <div class="page-actions">
+    <form method="post" action="/ops/bot/start">
+      <input type="hidden" name="csrf_token" value="{{ request.state._state.get('csrf_token', '') }}"/>
+      <button class="btn btn-ghost" type="submit"><i class="fa-solid fa-play"></i> Start bot</button>
+    </form>
+    <form method="post" action="/ops/bot/stop" hx-confirm="Остановить bot?">
+      <input type="hidden" name="csrf_token" value="{{ request.state._state.get('csrf_token', '') }}"/>
+      <button class="btn btn-danger" type="submit"><i class="fa-solid fa-stop"></i> Stop bot</button>
+    </form>
+    <form method="post" action="/ops/bot/restart" hx-confirm="Перезапустить bot?">
+      <input type="hidden" name="csrf_token" value="{{ request.state._state.get('csrf_token', '') }}"/>
+      <button class="btn btn-primary" type="submit"><i class="fa-solid fa-rotate-right"></i> Restart bot</button>
+    </form>
+  </div>
+</div>
 {% endblock %}

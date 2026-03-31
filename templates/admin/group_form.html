@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% from "macros.html" import page_head %}
+{% block title %}{{ title }}{% endblock %}
+{% block content %}
+{{ page_head(title) }}
+<div class="card content-stack">
+  <form class="form" method="post" action="{% if g %}/groups/{{ g.id }}{% else %}/groups{% endif %}">
+    <input type="hidden" name="csrf_token" value="{{ request.state._state.get('csrf_token', '') }}"/>
+    <div class="field">
+      <label for="name">Название группы</label>
+      <input id="name" name="name" required value="{{ g.name if g else '' }}" placeholder="Отдел технической поддержки РЕД ОС"/>
+    </div>
+    <div class="field">
+      <label for="room_id">Комната Matrix группы</label>
+      <input id="room_id" name="room_id" value="{{ g.room_id if g else '' }}" placeholder="!group-room:server"/>
+    </div>
+    <div class="field">
+      <label for="timezone_name">Таймзона группы</label>
+      <input id="timezone_name" name="timezone_name" value="{{ g.timezone if g and g.timezone else '' }}" placeholder="{{ bot_tz }}"/>
+      <p class="field-hint">Если пусто, используется таймзона системы ({{ bot_tz }}).</p>
+    </div>
+    <div class="field field-check">
+      <input type="checkbox" id="is_active" name="is_active" value="1" {% if not g or g.is_active %}checked{% endif %}/>
+      <label for="is_active">Группа активна</label>
+    </div>
+    <div class="page-actions">
+      <button class="btn btn-primary" type="submit">Сохранить</button>
+      <a class="btn btn-ghost" href="/groups">Отмена</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

@@ -54,6 +54,7 @@
         <span class="sep">—</span>
         <input type="time" id="work_hours_to" name="work_hours_to" value="{{ work_hours_to or '' }}"/>
       </div>
+      <p class="field-hint">Таймзона расписания: <strong>{{ bot_timezone() }}</strong>.</p>
     </div>
     <input type="hidden" name="work_hours" value="{{ work_hours or '' }}"/>
 

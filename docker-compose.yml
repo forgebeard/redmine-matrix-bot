@@ -70,6 +70,29 @@ services:
       start_period: 45s
 
   # ---------------------------------------------------------------------------
+  # Ограниченный прокси к Docker API для admin runtime-control.
+  # Не даём админке прямой доступ к raw docker.sock.
+  # ---------------------------------------------------------------------------
+  docker-socket-proxy:
+    image: tecnativa/docker-socket-proxy:latest
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      CONTAINERS: 1
+      GET: 1
+      POST: 1
+      DELETE: 0
+      IMAGES: 0
+      BUILD: 0
+      EXEC: 0
+      NETWORKS: 0
+      NODES: 0
+      SERVICES: 0
+      SWARM: 0
+      SYSTEM: 0
+
+  # ---------------------------------------------------------------------------
   # Админка (FastAPI): таблицы bot_users, маршруты; миграции Alembic при старте.
   # ---------------------------------------------------------------------------
   admin:
@@ -80,12 +103,17 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      docker-socket-proxy:
+        condition: service_started
     env_file:
       - .env
     environment:
       # См. комментарий выше про URL-encoded пароль.
       DATABASE_URL: postgresql://${POSTGRES_USER:-bot}:${POSTGRES_PASSWORD_URLENC:-${POSTGRES_PASSWORD}}@postgres:5432/${POSTGRES_DB:-redmine_matrix}
       APP_MASTER_KEY_FILE: ${APP_MASTER_KEY_FILE:-/run/secrets/app_master_key}
+      DOCKER_HOST: ${DOCKER_HOST:-tcp://docker-socket-proxy:2375}
+      DOCKER_TARGET_SERVICE: ${DOCKER_TARGET_SERVICE:-bot}
+      BOT_RUNTIME_STATUS_FILE: ${BOT_RUNTIME_STATUS_FILE:-/app/data/runtime_status.json}
     command:
       [
         "sh",
@@ -98,6 +126,8 @@ services:
     # (Docker/K8s secrets) или env APP_MASTER_KEY, а не через bind-файл.
     working_dir: /app
     user: bot
+    volumes:
+      - ./data:/app/data:ro
 
 volumes:
   postgres_data:

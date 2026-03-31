@@ -13,7 +13,17 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Integer, LargeBinary, String, Text, func
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Integer,
+    LargeBinary,
+    String,
+    Text,
+    func,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -29,6 +39,12 @@ class BotUser(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     redmine_id: Mapped[int] = mapped_column(Integer, unique=True, nullable=False, index=True)
     display_name: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    group_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("support_groups.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     department: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     room: Mapped[str] = mapped_column(Text, nullable=False)
     notify: Mapped[list] = mapped_column(JSONB, nullable=False, default=lambda: ["all"])
@@ -51,6 +67,35 @@ class VersionRoomRoute(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     version_key: Mapped[str] = mapped_column(String(512), unique=True, nullable=False, index=True)
     room_id: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class SupportGroup(Base):
+    __tablename__ = "support_groups"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
+    room_id: Mapped[str] = mapped_column(Text, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    timezone: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
+class BotOpsAudit(Base):
+    __tablename__ = "bot_ops_audit"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    actor_email: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    action: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False, index=True
+    )
 
 
 # ═══════════════════════════════════════════════════════════════════════════

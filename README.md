@@ -166,9 +166,20 @@ cd src && python3 -c "from config import validate_required_env; ok, m = validate
 
 ### 5. Запуск тестов
 
+Зависимости для pytest: `pip install -r requirements-test.txt`.
+
 ```bash
-python -m pytest tests/ -v --tb=short
+# Юнит- и API-тесты (без браузера)
+python -m pytest tests/ -v --tb=short --ignore=tests/e2e
 ```
+
+**E2E (Playwright)** — `tests/e2e/`: поднимают отдельный `uvicorn` и Chromium. Нужны `DATABASE_URL` на Postgres, после установки браузера: `python -m playwright install chromium`. Полный сценарий входа выполняется либо при пустой БД (одноразовая регистрация через `/setup` в фикстуре), либо при заданных **`E2E_ADMIN_EMAIL`** и **`E2E_ADMIN_PASSWORD`** в окружении.
+
+```bash
+python -m pytest tests/e2e/ -v --tb=short
+```
+
+В CI E2E вынесены в отдельный job (см. `.github/workflows/ci.yml`).
 
 ### 6. Тестовый запуск бота
 
@@ -190,7 +201,8 @@ python3 bot.py
 |--------|------------|
 | **bot** | Образ из `Dockerfile` (корневой `bot.py` + `src/`), том `./data` → `/app/data`, `.env` только для чтения; healthcheck: `python -c "import bot"` |
 | **postgres** | PostgreSQL 16, том `postgres_data`; `DATABASE_URL` в **bot** и **admin** |
-| **admin** | Веб-интерфейс (`admin_main.py`, FastAPI + Jinja2 + HTMX): шаблоны в `templates/admin/`, стили в `static/admin/css/` (раздача `/static/...`); ссылки на CSS с `?v=…` из **`ADMIN_ASSET_VERSION`** (по умолчанию `1`) для сброса кэша после обновления стилей; опционально **CSP** через `ADMIN_ENABLE_CSP` / `ADMIN_CSP_POLICY` в `.env`. Порт: **`ADMIN_PORT`** (по умолчанию 8080); при старте `alembic upgrade head` |
+| **docker-socket-proxy** | Ограниченный прокси к Docker API для runtime-control из admin (без прямого монтирования raw socket в admin) |
+| **admin** | Веб-интерфейс (`admin_main.py`, FastAPI + Jinja2 + HTMX): шаблоны в `templates/admin/`, стили в `static/admin/css/` (раздача `/static/...`); ссылки на CSS с `?v=…` из **`ADMIN_ASSET_VERSION`** (по умолчанию `1`) для сброса кэша после обновления стилей; runtime-control (`start/stop/restart` сервиса `bot`) через `DOCKER_HOST` + `DOCKER_TARGET_SERVICE`; опционально **CSP** через `ADMIN_ENABLE_CSP` / `ADMIN_CSP_POLICY` в `.env`. Порт: **`ADMIN_PORT`** (по умолчанию 8080); при старте `alembic upgrade head` |
 
 ### Подготовка `.env`
 
@@ -530,11 +542,11 @@ https://redmine.example.com/users/1972
 
 ## Тестирование
 
-В проекте **сотни тестов** в `tests/` (корневой `test_bot.py` и модули `src/`). В CI (`.github/workflows/ci.yml`) на push и pull request запускаются **pytest** и **сборка Docker-образа** с проверкой `python -c "import bot"`.
+В проекте **сотни тестов** в `tests/` (корневой `test_bot.py` и модули `src/`). В CI (`.github/workflows/ci.yml`) на push и pull request: **pytest** без каталога `tests/e2e/`, отдельный job **Playwright E2E** по `tests/e2e/`, **сборка Docker-образа** с проверкой `python -c "import bot"`.
 
 ```bash
-# Все тесты
-python -m pytest tests/ -v --tb=short
+# Юнит-тесты и API (без Playwright)
+python -m pytest tests/ -v --tb=short --ignore=tests/e2e
 
 # Один модуль
 python -m pytest tests/test_preferences.py -v
@@ -547,6 +559,7 @@ python -m pytest tests/ --cov=src --cov-report=term-missing
 |--------|-------|-----------------|
 | Корневой бот | `test_bot.py` | Логика `bot.py`, Matrix-моки, state, журналы |
 | Модули `src/` | `test_config.py`, `test_utils.py`, … | Конфиг, utils, state, preferences, matrix_client |
+| Админка E2E | `tests/e2e/` | Playwright: страница логина, редирект без сессии, вход (при пустой БД или `E2E_ADMIN_*`) |
 
 ---
 

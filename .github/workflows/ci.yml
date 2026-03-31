@@ -34,13 +34,48 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -r requirements.txt -r requirements-test.txt
-      - name: pytest
+      - name: pytest (unit + API, без Playwright)
         run: |
           alembic upgrade head
           alembic downgrade -1 || true
           alembic upgrade head
           python scripts/check_env_sync.py
-          python -m pytest tests/ -q --tb=short
+          python -m pytest tests/ -q --tb=short --ignore=tests/e2e
+
+  e2e:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: bot
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: redmine_matrix
+        ports:
+          - "5432:5432"
+        options: >-
+          --health-cmd "pg_isready -U bot -d redmine_matrix"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://bot:postgres@localhost:5432/redmine_matrix
+      APP_MASTER_KEY: 0123456789abcdef0123456789abcdef
+      SMTP_MOCK: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt -r requirements-test.txt
+      - name: Migrate DB
+        run: alembic upgrade head
+      - name: Install Playwright Chromium
+        run: python -m playwright install chromium
+      - name: pytest e2e (Playwright)
+        run: python -m pytest tests/e2e/ -q --tb=short
 
   docker:
     runs-on: ubuntu-latest

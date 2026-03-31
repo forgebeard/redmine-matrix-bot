@@ -1,4 +1,5 @@
 import os
+import re
 
 from fastapi.testclient import TestClient
 
@@ -21,6 +22,8 @@ def test_health_ok(client: TestClient):
     r = client.get("/health")
     assert r.status_code == 200
     assert r.json() == {"status": "ok"}
+    assert r.headers.get("x-content-type-options") == "nosniff"
+    assert r.headers.get("x-frame-options") == "DENY"
 
 
 def test_health_smtp_ok_in_mock_mode(client: TestClient):
@@ -107,6 +110,23 @@ def test_users_redirects_to_login_without_auth(client: TestClient):
     assert r.headers.get("location", "").endswith("/login")
 
 
+def _setup_and_login_admin(client: TestClient, email: str = "test_admin@example.com", password: str = "StrongPassword123") -> None:
+    setup = client.get("/setup")
+    token = setup.cookies.get("admin_csrf")
+    client.post(
+        "/setup",
+        data={"email": email, "password": password, "csrf_token": token},
+        follow_redirects=False,
+    )
+    login = client.get("/login")
+    ltoken = login.cookies.get("admin_csrf")
+    client.post(
+        "/login",
+        data={"email": email, "password": password, "csrf_token": ltoken},
+        follow_redirects=True,
+    )
+
+
 def test_onboarding_page_copy(client: TestClient):
     r = client.get("/onboarding", follow_redirects=False)
     # Без авторизации будет редирект на login/setup, поэтому проверяем только если отдалась страница.
@@ -119,25 +139,28 @@ def test_redmine_search_without_redmine_creds_returns_empty(client: TestClient):
     if not db_url or not db_url.startswith("postgresql://"):
         pytest.skip("Тест требует Postgres (DATABASE_URL)")
 
-    setup = client.get("/setup")
-    token = setup.cookies.get("admin_csrf")
-    client.post(
-        "/setup",
-        data={
-            "email": "test_admin@example.com",
-            "password": "StrongPassword123",
-            "csrf_token": token,
-        },
-        follow_redirects=False,
-    )
-    login = client.get("/login")
-    ltoken = login.cookies.get("admin_csrf")
-    client.post(
-        "/login",
-        data={"email": "test_admin@example.com", "password": "StrongPassword123", "csrf_token": ltoken},
-        follow_redirects=True,
-    )
+    _setup_and_login_admin(client)
     r = client.get("/redmine/users/search?q=ivan")
     assert r.status_code == 200
-    assert r.text == ""
+    assert "Redmine не настроен" in r.text
+
+
+def test_groups_page_requires_auth(client: TestClient):
+    r = client.get("/groups", follow_redirects=False)
+    assert r.status_code in (301, 302, 303, 307, 308)
+    assert r.headers.get("location", "").endswith("/login")
+
+
+def test_ops_restart_accepts_and_redirects(client: TestClient, monkeypatch):
+    db_url = os.getenv("DATABASE_URL", "")
+    if not db_url or not db_url.startswith("postgresql://"):
+        pytest.skip("Тест требует Postgres (DATABASE_URL)")
+    _setup_and_login_admin(client, email="ops_admin@example.com")
+
+    monkeypatch.setattr(admin_main, "_restart_in_background", lambda actor: None)
+    page = client.get("/")
+    token = page.cookies.get("admin_csrf")
+    r = client.post("/ops/bot/restart", data={"csrf_token": token}, follow_redirects=False)
+    assert r.status_code in (302, 303)
+    assert re.search(r"/\\?ops=restart_accepted$", r.headers.get("location", ""))
 
