@@ -4,13 +4,13 @@
 
 - День 1: пакет `src/admin/` (`constants`, `templates_env`, `csrf`, `csp`, `lifespan`), `routers/health.py`.
 - День 2–3: `runtime.py`, `session_logic.py`, `timeutil.py`, `middleware/auth.py` (сессии + CSRF cookie).
+- День 4: `auth_helpers.py`, `routers/auth.py` (login, setup, onboarding, forgot/reset, logout).
 
 ## Дальше по дням
 
 | День | Задача |
 |------|--------|
-| 4 | Роутер `routers/auth.py` (login, setup, forgot/reset, logout, onboarding) |
-| 5 | Роутер `users` / `ops` / остальное порциями; тонкий `admin_main` |
+| 5 | Роутеры `ops`, `users`, `routes`, `matrix_bind`, `me` — порциями |
 
 ## Инварианты
 
