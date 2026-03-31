@@ -202,7 +202,7 @@ python3 bot.py
 | **bot** | Образ из `Dockerfile` (корневой `bot.py` + `src/`), том `./data` → `/app/data`, `.env` только для чтения; healthcheck: `python -c "import bot"` |
 | **postgres** | PostgreSQL 16, том `postgres_data`; `DATABASE_URL` в **bot** и **admin** |
 | **docker-socket-proxy** | Ограниченный прокси к Docker API для runtime-control из admin (без прямого монтирования raw socket в admin) |
-| **admin** | Веб-интерфейс (`admin_main.py`, FastAPI + Jinja2 + HTMX): шаблоны в `templates/admin/`, стили в `static/admin/css/` (раздача `/static/...`); ссылки на CSS с `?v=…` из **`ADMIN_ASSET_VERSION`** (по умолчанию `1`) для сброса кэша после обновления стилей; runtime-control (`start/stop/restart` сервиса `bot`) через `DOCKER_HOST` + `DOCKER_TARGET_SERVICE`; опционально **CSP** через `ADMIN_ENABLE_CSP` / `ADMIN_CSP_POLICY` в `.env`. Порт: **`ADMIN_PORT`** (по умолчанию 8080); при старте `alembic upgrade head` |
+| **admin** | Веб-интерфейс (`admin_main.py`, FastAPI + Jinja2 + HTMX): шаблоны в `templates/admin/`, стили в `static/admin/css/` (раздача `/static/...`); ссылки на CSS с `?v=…` из **`ADMIN_ASSET_VERSION`** (по умолчанию `1`) для сброса кэша после обновления стилей; runtime-control (`start/stop/restart` сервиса `bot`) через `DOCKER_HOST` + `DOCKER_TARGET_SERVICE`, но только при **`ADMIN_ENABLE_RUNTIME_OPS=1`**; опционально **CSP** через `ADMIN_ENABLE_CSP` / `ADMIN_CSP_POLICY` в `.env`. Порт: **`ADMIN_PORT`** (по умолчанию 8080); при старте `alembic upgrade head` |
 
 ### Подготовка `.env`
 

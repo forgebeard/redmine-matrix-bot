@@ -158,9 +158,27 @@ def test_ops_restart_accepts_and_redirects(client: TestClient, monkeypatch):
     _setup_and_login_admin(client, email="ops_admin@example.com")
 
     monkeypatch.setattr(admin_main, "_restart_in_background", lambda actor: None)
+    monkeypatch.setattr(admin_main, "_ops_enabled", lambda: True)
     page = client.get("/")
     token = page.cookies.get("admin_csrf")
     r = client.post("/ops/bot/restart", data={"csrf_token": token}, follow_redirects=False)
     assert r.status_code in (302, 303)
     assert re.search(r"/\\?ops=restart_accepted$", r.headers.get("location", ""))
+
+
+def test_ops_restart_api_returns_202_and_job(client: TestClient, monkeypatch):
+    db_url = os.getenv("DATABASE_URL", "")
+    if not db_url or not db_url.startswith("postgresql://"):
+        pytest.skip("Тест требует Postgres (DATABASE_URL)")
+    _setup_and_login_admin(client, email="ops_api_admin@example.com")
+    monkeypatch.setattr(admin_main, "_ops_enabled", lambda: True)
+    monkeypatch.setattr(admin_main, "_restart_in_background", lambda actor, job_id=None: None)
+    page = client.get("/")
+    token = page.cookies.get("admin_csrf")
+    r = client.post("/api/ops/bot/restart", data={"csrf_token": token})
+    assert r.status_code == 202
+    payload = r.json()
+    assert payload["status"] == "accepted"
+    assert payload["action"] == "restart"
+    assert payload["job_id"]
 

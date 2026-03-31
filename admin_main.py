@@ -28,7 +28,7 @@ _ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(_ROOT / "src"))
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -135,6 +135,7 @@ SETUP_PATH = "/setup"
 SESSION_IDLE_TIMEOUT_SECONDS = int(os.getenv("ADMIN_SESSION_IDLE_TIMEOUT", "1800"))
 RUNTIME_STATUS_FILE = os.getenv("BOT_RUNTIME_STATUS_FILE", "/app/data/runtime_status.json")
 GROUP_UNASSIGNED_NAME = "UNASSIGNED"
+ADMIN_ENABLE_RUNTIME_OPS = (os.getenv("ADMIN_ENABLE_RUNTIME_OPS", "0").strip().lower() in ("1", "true", "yes", "on"))
 
 AUTH_TOKEN_SALT = os.getenv("AUTH_TOKEN_SALT", "dev-token-salt")
 SESSION_TTL_SECONDS = int(os.getenv("SESSION_TTL_SECONDS", "86400"))
@@ -332,12 +333,17 @@ _redmine_search_breaker = _RedmineSearchBreaker()
 
 
 _process_started_at = time.monotonic()
+_ops_jobs: dict[str, dict] = {}
 
 
 def _runtime_status_from_file() -> dict:
     p = Path(RUNTIME_STATUS_FILE)
     if not p.exists():
         return {}
+
+
+def _ops_enabled() -> bool:
+    return ADMIN_ENABLE_RUNTIME_OPS
     try:
         raw = json.loads(p.read_text(encoding="utf-8"))
         return raw if isinstance(raw, dict) else {}
@@ -933,6 +939,7 @@ async def index(
             "users_count": nu,
             "status_routes_count": ns,
             "version_routes_count": nv,
+            "runtime_ops_enabled": _ops_enabled(),
             "runtime_status": {
                 "uptime_s": int(time.monotonic() - _process_started_at),
                 "live": True,
@@ -944,7 +951,7 @@ async def index(
     )
 
 
-def _restart_in_background(actor_email: str | None) -> None:
+def _restart_in_background(actor_email: str | None, job_id: str | None = None) -> None:
     def _run() -> None:
         time.sleep(1.5)
         detail = ""
@@ -955,6 +962,10 @@ def _restart_in_background(actor_email: str | None) -> None:
         except Exception as e:  # noqa: BLE001
             status = "error"
             detail = str(e)
+        if job_id and job_id in _ops_jobs:
+            _ops_jobs[job_id]["status"] = "success" if status == "ok" else "failed"
+            _ops_jobs[job_id]["finished_at"] = _now_utc().isoformat()
+            _ops_jobs[job_id]["detail"] = detail
 
         async def _persist() -> None:
             factory = get_session_factory()
@@ -982,6 +993,8 @@ async def bot_ops_action(
     current = getattr(request.state, "current_user", None)
     if not current or getattr(current, "role", "") != "admin":
         raise HTTPException(403, "Только admin")
+    if not _ops_enabled():
+        raise HTTPException(403, "Runtime operations disabled")
     ip = _client_ip(request)
     if not _rate_limiter.hit(f"ops:{ip}:{current.email}", limit=12, window_seconds=60):
         raise HTTPException(429, "Слишком много операций, попробуйте позже")
@@ -993,7 +1006,7 @@ async def bot_ops_action(
     if action == "restart":
         await _audit_op(session, "BOT_RESTART", "accepted", actor_email=actor, detail="scheduled")
         await session.commit()
-        _restart_in_background(actor)
+        _restart_in_background(actor, job_id=None)
         return RedirectResponse("/?ops=restart_accepted", status_code=303)
 
     try:
@@ -1017,6 +1030,67 @@ async def bot_ops_action(
         )
         await session.commit()
         return RedirectResponse(f"/?ops={action}_error", status_code=303)
+
+
+@app.post("/api/ops/bot/{action}")
+async def bot_ops_action_api(
+    request: Request,
+    action: str,
+    csrf_token: Annotated[str, Form()] = "",
+    session: AsyncSession = Depends(get_session),
+):
+    _verify_csrf(request, csrf_token)
+    current = getattr(request.state, "current_user", None)
+    if not current or getattr(current, "role", "") != "admin":
+        raise HTTPException(403, "Только admin")
+    if not _ops_enabled():
+        raise HTTPException(403, "Runtime operations disabled")
+    ip = _client_ip(request)
+    if not _rate_limiter.hit(f"ops_api:{ip}:{current.email}", limit=12, window_seconds=60):
+        raise HTTPException(429, "Слишком много операций, попробуйте позже")
+    allowed = {"start", "stop", "restart"}
+    if action not in allowed:
+        raise HTTPException(400, "Недопустимое действие")
+
+    actor = current.email
+    if action == "restart":
+        job_id = str(uuid.uuid4())
+        _ops_jobs[job_id] = {
+            "job_id": job_id,
+            "action": "restart",
+            "status": "queued",
+            "created_at": _now_utc().isoformat(),
+            "actor": actor,
+            "detail": "",
+        }
+        await _audit_op(session, "BOT_RESTART", "accepted", actor_email=actor, detail=f"job_id={job_id}")
+        await session.commit()
+        _restart_in_background(actor, job_id=job_id)
+        return JSONResponse({"job_id": job_id, "status": "accepted", "action": "restart"}, status_code=202)
+
+    try:
+        res = control_service(action)
+        await _audit_op(session, f"BOT_{action.upper()}", "ok", actor_email=actor, detail=json.dumps(res, ensure_ascii=False))
+        await session.commit()
+        return JSONResponse({"status": "ok", "action": action, "detail": res}, status_code=200)
+    except DockerControlError as e:
+        await _audit_op(session, f"BOT_{action.upper()}", "error", actor_email=actor, detail=str(e))
+        await session.commit()
+        raise HTTPException(502, f"runtime operation failed: {e}")
+
+
+@app.get("/api/ops/jobs/{job_id}")
+async def ops_job_status(
+    request: Request,
+    job_id: str,
+):
+    current = getattr(request.state, "current_user", None)
+    if not current or getattr(current, "role", "") != "admin":
+        raise HTTPException(403, "Только admin")
+    data = _ops_jobs.get(job_id)
+    if not data:
+        raise HTTPException(404, "job not found")
+    return JSONResponse(data)
 
 
 @app.get("/secrets", response_class=HTMLResponse)
@@ -1582,24 +1656,51 @@ async def redmine_users_search(
         from urllib.request import Request, urlopen
         from urllib.error import HTTPError, URLError
 
-        params = urlencode({"name": q, "limit": str(limit_i)})
-        url = f"{REDMINE_URL.rstrip('/')}/users.json?{params}"
-        req = Request(url, headers={"X-Redmine-API-Key": REDMINE_API_KEY})
-        try:
-            with urlopen(req, timeout=5.0) as r:
-                payload = json.loads(r.read().decode("utf-8", errors="replace"))
-            items = payload.get("users") if isinstance(payload, dict) else []
-            return (items if isinstance(items, list) else [], None)
-        except HTTPError as e:
-            return [], f"http_{e.code}"
-        except URLError:
-            return [], "timeout"
-        except Exception:
-            return [], "error"
+        def _fetch_with(url: str, headers: dict | None = None) -> tuple[list[dict], str | None]:
+            req = Request(url, headers=headers or {})
+            try:
+                with urlopen(req, timeout=5.0) as r:
+                    payload = json.loads(r.read().decode("utf-8", errors="replace"))
+                items = payload.get("users") if isinstance(payload, dict) else []
+                return (items if isinstance(items, list) else [], None)
+            except HTTPError as e:
+                return [], f"http_{e.code}"
+            except URLError:
+                return [], "timeout"
+            except Exception:
+                return [], "error"
+
+        base = REDMINE_URL.rstrip("/")
+        base_params = {"name": q, "limit": str(limit_i)}
+
+        # 1) Основной путь: API key в header.
+        url = f"{base}/users.json?{urlencode(base_params)}"
+        users, err = _fetch_with(url, {"X-Redmine-API-Key": REDMINE_API_KEY})
+        if err is None:
+            return users, None
+
+        # 2) Фолбэк: некоторые прокси/инстансы принимают key только в query.
+        if err == "http_403":
+            url_q = f"{base}/users.json?{urlencode({**base_params, 'key': REDMINE_API_KEY})}"
+            users2, err2 = _fetch_with(url_q)
+            if err2 is None:
+                return users2, None
+            # 3) Ещё один фолбэк: поиск по login (на части инстансов name ограничен).
+            url_login = f"{base}/users.json?{urlencode({'name': q, 'login': q, 'limit': str(limit_i), 'key': REDMINE_API_KEY})}"
+            users3, err3 = _fetch_with(url_login)
+            if err3 is None:
+                return users3, None
+            return [], err3
+
+        return [], err
 
     users_raw, err = await asyncio.to_thread(_do_search)
     if err:
         _redmine_search_breaker.on_failure()
+        if err == "http_403":
+            return HTMLResponse(
+                '<option value="">Ошибка поиска: 403 (нет прав API на users или ключ отклонён)</option>'
+            )
         return HTMLResponse(f'<option value="">Ошибка поиска: {html_escape(err)}</option>')
     _redmine_search_breaker.on_success()
     users = users_raw

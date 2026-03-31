@@ -49,18 +49,21 @@
     Последний цикл: {{ cycle.last_cycle_at or "—" }}; длительность: {{ cycle.last_cycle_duration_s or "—" }}с;
     ошибок: {{ cycle.error_count or 0 }}.
   </p>
+  {% if not runtime_ops_enabled %}
+  <p class="warning">Runtime-операции выключены. Включите <code>ADMIN_ENABLE_RUNTIME_OPS=1</code> в окружении админки.</p>
+  {% endif %}
   <div class="page-actions">
     <form method="post" action="/ops/bot/start">
       <input type="hidden" name="csrf_token" value="{{ request.state._state.get('csrf_token', '') }}"/>
-      <button class="btn btn-ghost" type="submit"><i class="fa-solid fa-play"></i> Start bot</button>
+      <button class="btn btn-ghost" type="submit" {% if not runtime_ops_enabled %}disabled{% endif %}><i class="fa-solid fa-play"></i> Start bot</button>
     </form>
     <form method="post" action="/ops/bot/stop" hx-confirm="Остановить bot?">
       <input type="hidden" name="csrf_token" value="{{ request.state._state.get('csrf_token', '') }}"/>
-      <button class="btn btn-danger" type="submit"><i class="fa-solid fa-stop"></i> Stop bot</button>
+      <button class="btn btn-danger" type="submit" {% if not runtime_ops_enabled %}disabled{% endif %}><i class="fa-solid fa-stop"></i> Stop bot</button>
     </form>
     <form method="post" action="/ops/bot/restart" hx-confirm="Перезапустить bot?">
       <input type="hidden" name="csrf_token" value="{{ request.state._state.get('csrf_token', '') }}"/>
-      <button class="btn btn-primary" type="submit"><i class="fa-solid fa-rotate-right"></i> Restart bot</button>
+      <button class="btn btn-primary" type="submit" {% if not runtime_ops_enabled %}disabled{% endif %}><i class="fa-solid fa-rotate-right"></i> Restart bot</button>
     </form>
   </div>
 </div>
