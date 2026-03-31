@@ -11,7 +11,6 @@ import asyncio
 import hashlib
 import json
 from html import escape as html_escape
-import logging
 import os
 import sys
 import secrets
@@ -20,14 +19,13 @@ import time
 import uuid
 from pathlib import Path
 from typing import Annotated
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 _ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(_ROOT / "src"))
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.staticfiles import StaticFiles
 from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -61,15 +59,12 @@ from security import (
 
 from matrix_send import room_send_with_retry
 from ops.docker_control import DockerControlError, control_service, get_service_status
-from rate_limit import SimpleRateLimiter
 
 from admin.constants import (
-    ADMIN_EXISTS_CACHE_TTL_SECONDS,
     AUTH_TOKEN_SALT,
     COOKIE_SECURE,
     CSRF_COOKIE_NAME,
     GROUP_UNASSIGNED_NAME,
-    INTEGRATION_STATUS_CACHE_TTL_SECONDS,
     NOTIFY_TYPE_KEYS,
     ONBOARDING_SKIPPED_SECRET,
     REDMINE_API_KEY,
@@ -78,7 +73,6 @@ from admin.constants import (
     RESET_TOKEN_TTL_SECONDS,
     RUNTIME_STATUS_FILE,
     SESSION_COOKIE_NAME,
-    SESSION_IDLE_TIMEOUT_SECONDS,
     SESSION_TTL_SECONDS,
     SETUP_PATH,
     SHOW_DEV_TOKENS,
@@ -88,6 +82,21 @@ from admin.csrf import ensure_csrf as _ensure_csrf, verify_csrf as _verify_csrf
 from admin.lifespan import admin_lifespan as _admin_lifespan
 from admin.routers.health import router as health_router
 from admin.templates_env import admin_asset_version as _admin_asset_version, templates
+from admin.runtime import (
+    admin_exists_cache,
+    integration_status_cache,
+    logger,
+    process_started_at,
+    rate_limiter,
+    redmine_search_breaker,
+)
+from admin.middleware.auth import AuthMiddleware
+from admin.session_logic import (
+    has_admin as db_has_admin,
+    integration_status as load_integration_status,
+    runtime_status_from_file,
+)
+from admin.timeutil import now_utc as _now_utc
 
 app = FastAPI(
     title="Matrix bot control panel",
@@ -100,10 +109,6 @@ app.middleware("http")(security_headers_middleware)
 _STATIC_ROOT = _ROOT / "static"
 if _STATIC_ROOT.is_dir():
     app.mount("/static", StaticFiles(directory=str(_STATIC_ROOT)), name="static")
-
-
-def _now_utc() -> datetime:
-    return datetime.now(timezone.utc)
 
 
 def _token_hash(value: str) -> str:
@@ -150,217 +155,6 @@ async def _audit_op(
     )
 
 
-_rate_limiter = SimpleRateLimiter()
-logger = logging.getLogger("admin")
-
-
-class _AdminExistsCache:
-    def __init__(self):
-        self.value: bool | None = None
-        self.expires_ts: float = 0.0
-
-    def get(self) -> bool | None:
-        if self.value is None:
-            return None
-        if datetime.now().timestamp() >= self.expires_ts:
-            return None
-        return self.value
-
-    def set(self, value: bool):
-        self.value = value
-        self.expires_ts = datetime.now().timestamp() + ADMIN_EXISTS_CACHE_TTL_SECONDS
-
-    def invalidate(self):
-        self.value = None
-        self.expires_ts = 0.0
-
-
-_admin_exists_cache = _AdminExistsCache()
-
-
-class _IntegrationStatusCache:
-    def __init__(self):
-        self.value: dict | None = None
-        self.expires_ts: float = 0.0
-
-    def get(self) -> dict | None:
-        if self.value is None:
-            return None
-        if datetime.now().timestamp() >= self.expires_ts:
-            return None
-        return self.value
-
-    def set(self, value: dict):
-        self.value = value
-        self.expires_ts = datetime.now().timestamp() + INTEGRATION_STATUS_CACHE_TTL_SECONDS
-
-    def invalidate(self):
-        self.value = None
-        self.expires_ts = 0.0
-
-
-_integration_status_cache = _IntegrationStatusCache()
-
-
-class _RedmineSearchBreaker:
-    """In-memory circuit breaker для поиска пользователей Redmine."""
-
-    def __init__(self):
-        self.failures = 0
-        self.cooldown_until_ts = 0.0
-
-    def blocked(self) -> bool:
-        return datetime.now().timestamp() < self.cooldown_until_ts
-
-    def on_success(self) -> None:
-        self.failures = 0
-        self.cooldown_until_ts = 0.0
-
-    def on_failure(self) -> None:
-        self.failures += 1
-        if self.failures >= 5:
-            self.cooldown_until_ts = datetime.now().timestamp() + 60
-
-
-_redmine_search_breaker = _RedmineSearchBreaker()
-
-
-_process_started_at = time.monotonic()
-
-
-def _runtime_status_from_file() -> dict:
-    p = Path(RUNTIME_STATUS_FILE)
-    if not p.exists():
-        return {}
-    try:
-        raw = json.loads(p.read_text(encoding="utf-8"))
-        return raw if isinstance(raw, dict) else {}
-    except Exception:
-        return {}
-
-
-async def _has_admin(session: AsyncSession, use_cache: bool = True) -> bool:
-    if use_cache:
-        cached = _admin_exists_cache.get()
-        if cached is not None:
-            return cached
-    any_admin = await session.execute(
-        select(BotAppUser.id).where(BotAppUser.role == "admin").limit(1)
-    )
-    value = any_admin.scalar_one_or_none() is not None
-    _admin_exists_cache.set(value)
-    return value
-
-
-async def _integration_status(session: AsyncSession, use_cache: bool = True) -> dict:
-    if use_cache:
-        cached = _integration_status_cache.get()
-        if cached is not None:
-            return cached
-    rows = await session.execute(select(AppSecret.name).where(AppSecret.name.in_(REQUIRED_SECRET_NAMES + [ONBOARDING_SKIPPED_SECRET])))
-    names = {r[0] for r in rows.all()}
-    missing = [name for name in REQUIRED_SECRET_NAMES if name not in names]
-    status = {
-        "configured": len(missing) == 0,
-        "missing": missing,
-        "skipped": ONBOARDING_SKIPPED_SECRET in names,
-    }
-    _integration_status_cache.set(status)
-    return status
-
-
-class AuthMiddleware(BaseHTTPMiddleware):
-    """
-    Auth для админки через DB-сессии после login по email/password.
-    """
-
-    async def dispatch(self, request: Request, call_next):
-        p = request.url.path
-        if p.startswith("/static/") or p == "/favicon.ico":
-            return await call_next(request)
-        if p in (
-            "/login",
-            "/forgot-password",
-            "/reset-password",
-            "/health",
-            "/health/live",
-            "/health/ready",
-            "/health/smtp",
-            SETUP_PATH,
-        ) or p.startswith("/docs") or p in (
-            "/openapi.json",
-            "/redoc",
-        ):
-            return await call_next(request)
-
-        try:
-            factory = get_session_factory()
-            async with factory() as session:
-                has_admin = await _has_admin(session)
-        except Exception:
-            # Если БД недоступна/не настроена, не падаем на middleware для публичных редиректов.
-            return RedirectResponse("/login", status_code=303)
-
-        if not has_admin and p != SETUP_PATH:
-            return RedirectResponse(SETUP_PATH, status_code=303)
-
-        token_raw = request.cookies.get(SESSION_COOKIE_NAME, "")
-        if not token_raw:
-            return RedirectResponse("/login", status_code=303)
-
-        try:
-            token_uuid = uuid.UUID(token_raw)
-        except Exception:
-            return RedirectResponse("/login", status_code=303)
-
-        factory = get_session_factory()
-        try:
-            async with factory() as session:
-                now = _now_utc()
-                s = await session.execute(
-                    select(BotSession).where(
-                        BotSession.session_token == token_uuid,
-                        BotSession.expires_at > now,
-                    )
-                )
-                sess = s.scalar_one_or_none()
-                if not sess:
-                    return RedirectResponse("/login", status_code=303)
-
-                u = await session.execute(
-                    select(BotAppUser).where(BotAppUser.id == sess.user_id)
-                )
-                user = u.scalar_one_or_none()
-                if not user:
-                    return RedirectResponse("/login", status_code=303)
-                if sess.session_version != getattr(user, "session_version", 1):
-                    return RedirectResponse("/login", status_code=303)
-
-                # Sliding idle timeout: продлеваем активную сессию на каждый запрос.
-                sess.expires_at = now + timedelta(seconds=SESSION_IDLE_TIMEOUT_SECONDS)
-                await session.flush()
-                await session.commit()
-
-                request.state.current_user = user
-                request.state.integration_status = await _integration_status(session)
-        except Exception:
-            return RedirectResponse("/login", status_code=303)
-
-        csrf_token, set_csrf_cookie = _ensure_csrf(request)
-        request.state.csrf_token = csrf_token
-        response = await call_next(request)
-        if set_csrf_cookie:
-            response.set_cookie(
-                CSRF_COOKIE_NAME,
-                csrf_token,
-                httponly=True,
-                secure=COOKIE_SECURE,
-                samesite="lax",
-                path="/",
-            )
-        return response
-
-
 app.add_middleware(AuthMiddleware)
 
 
@@ -372,7 +166,7 @@ async def login_page(request: Request):
         factory = get_session_factory()
         async with factory() as session:
             # Do not use cache here: page should immediately reflect setup completion.
-            can_register_admin = not await _has_admin(session, use_cache=False)
+            can_register_admin = not await db_has_admin(session, use_cache=False)
     except Exception:
         can_register_admin = False
     resp = templates.TemplateResponse(
@@ -393,7 +187,7 @@ async def login_page(request: Request):
 
 @app.get(SETUP_PATH, response_class=HTMLResponse)
 async def setup_page(request: Request, session: AsyncSession = Depends(get_session)):
-    if await _has_admin(session):
+    if await db_has_admin(session):
         return RedirectResponse("/login", status_code=303)
     csrf_token, set_cookie = _ensure_csrf(request)
     resp = templates.TemplateResponse(
@@ -422,7 +216,7 @@ async def setup_post(
 ):
     _verify_csrf(request, csrf_token)
     ip = _client_ip(request)
-    if not _rate_limiter.hit(f"setup:ip:{ip}", limit=10, window_seconds=3600):
+    if not rate_limiter.hit(f"setup:ip:{ip}", limit=10, window_seconds=3600):
         csrf_ok, _ = _ensure_csrf(request)
         return templates.TemplateResponse(
             request,
@@ -472,7 +266,7 @@ async def setup_post(
         session_version=1,
     )
     session.add(user)
-    _admin_exists_cache.invalidate()
+    admin_exists_cache.invalidate()
     return RedirectResponse("/onboarding", status_code=303)
 
 
@@ -486,7 +280,7 @@ async def login_post(
 ):
     _verify_csrf(request, csrf_token)
     ip = _client_ip(request)
-    if not _rate_limiter.hit(f"login:ip:{ip}", limit=5, window_seconds=60):
+    if not rate_limiter.hit(f"login:ip:{ip}", limit=5, window_seconds=60):
         raise HTTPException(429, "Слишком много попыток, попробуйте позже")
 
     email = (email or "").strip().lower()
@@ -515,7 +309,7 @@ async def login_post(
     )
     session.add(st)
     await session.flush()
-    integration_status = await _integration_status(session, use_cache=False)
+    integration_status = await load_integration_status(session, use_cache=False)
     next_url = "/onboarding" if (not integration_status["configured"] and not integration_status["skipped"]) else "/"
     resp = RedirectResponse(next_url, status_code=303)
     resp.set_cookie(
@@ -535,7 +329,7 @@ async def onboarding_page(request: Request, session: AsyncSession = Depends(get_
     user = getattr(request.state, "current_user", None)
     if not user or getattr(user, "role", "") != "admin":
         return RedirectResponse("/login", status_code=303)
-    status = await _integration_status(session)
+    status = await load_integration_status(session)
     csrf_token, set_cookie = _ensure_csrf(request)
     resp = templates.TemplateResponse(
         request,
@@ -582,7 +376,7 @@ async def onboarding_save(
         logger.info("secret_updated name=%s actor=%s key_version=%s", secret_name, mask_email(user.email), enc.key_version)
     # onboarding is complete once values were submitted; remove skip marker.
     await session.execute(delete(AppSecret).where(AppSecret.name == ONBOARDING_SKIPPED_SECRET))
-    _integration_status_cache.invalidate()
+    integration_status_cache.invalidate()
     return RedirectResponse("/", status_code=303)
 
 
@@ -602,7 +396,7 @@ async def onboarding_skip(
     if row is None:
         enc = encrypt_secret("1", key=key)
         session.add(AppSecret(name=ONBOARDING_SKIPPED_SECRET, ciphertext=enc.ciphertext, nonce=enc.nonce, key_version=enc.key_version))
-    _integration_status_cache.invalidate()
+    integration_status_cache.invalidate()
     return RedirectResponse("/", status_code=303)
 
 
@@ -629,9 +423,9 @@ async def forgot_password_post(
     _verify_csrf(request, csrf_token)
     email = (email or "").strip().lower()
     ip = _client_ip(request)
-    if not _rate_limiter.hit(f"forgot:ip:{ip}", limit=5, window_seconds=60):
+    if not rate_limiter.hit(f"forgot:ip:{ip}", limit=5, window_seconds=60):
         raise HTTPException(429, "Слишком много попыток, попробуйте позже")
-    if not _rate_limiter.hit(f"forgot:email:{email}", limit=3, window_seconds=3600):
+    if not rate_limiter.hit(f"forgot:email:{email}", limit=3, window_seconds=3600):
         return templates.TemplateResponse(
             request,
             "forgot_password.html",
@@ -703,7 +497,7 @@ async def reset_password_post(
 ):
     _verify_csrf(request, csrf_token)
     ip = _client_ip(request)
-    if not _rate_limiter.hit(f"reset_pw:ip:{ip}", limit=20, window_seconds=900):
+    if not rate_limiter.hit(f"reset_pw:ip:{ip}", limit=20, window_seconds=900):
         return templates.TemplateResponse(
             request,
             "reset_password.html",
@@ -783,7 +577,7 @@ async def index(
     if not user or getattr(user, "role", "") != "admin":
         raise HTTPException(403, "Только admin")
     nu, ns, nv = await row_counts(session)
-    runtime_file = _runtime_status_from_file()
+    runtime_file = runtime_status_from_file()
     try:
         runtime_docker = get_service_status()
     except DockerControlError as e:
@@ -796,7 +590,7 @@ async def index(
             "status_routes_count": ns,
             "version_routes_count": nv,
             "runtime_status": {
-                "uptime_s": int(time.monotonic() - _process_started_at),
+                "uptime_s": int(time.monotonic() - process_started_at),
                 "live": True,
                 "ready": True,
                 "cycle": runtime_file,
@@ -845,7 +639,7 @@ async def bot_ops_action(
     if not current or getattr(current, "role", "") != "admin":
         raise HTTPException(403, "Только admin")
     ip = _client_ip(request)
-    if not _rate_limiter.hit(f"ops:{ip}:{current.email}", limit=12, window_seconds=60):
+    if not rate_limiter.hit(f"ops:{ip}:{current.email}", limit=12, window_seconds=60):
         raise HTTPException(429, "Слишком много операций, попробуйте позже")
 
     allowed = {"start", "stop", "restart"}
@@ -929,7 +723,7 @@ async def secrets_save(
         row.ciphertext = enc.ciphertext
         row.nonce = enc.nonce
         row.key_version = enc.key_version
-    _integration_status_cache.invalidate()
+    integration_status_cache.invalidate()
     logger.info(
         "secret_updated name=%s actor=%s key_version=%s",
         name,
@@ -1432,7 +1226,7 @@ async def redmine_users_search(
     user = getattr(request.state, "current_user", None)
     if not user or getattr(user, "role", "") != "admin":
         raise HTTPException(403, "Только admin")
-    if _redmine_search_breaker.blocked():
+    if redmine_search_breaker.blocked():
         logger.warning("Redmine search blocked due to cooldown")
         return HTMLResponse('<option value="">Поиск временно недоступен (cooldown)</option>')
 
@@ -1461,9 +1255,9 @@ async def redmine_users_search(
 
     users_raw, err = await asyncio.to_thread(_do_search)
     if err:
-        _redmine_search_breaker.on_failure()
+        redmine_search_breaker.on_failure()
         return HTMLResponse(f'<option value="">Ошибка поиска: {html_escape(err)}</option>')
-    _redmine_search_breaker.on_success()
+    redmine_search_breaker.on_success()
     users = users_raw
 
     opts: list[str] = []

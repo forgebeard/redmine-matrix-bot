@@ -1,19 +1,16 @@
 # План выноса админки из `admin_main.py` (неделя, внутренняя чистота)
 
-## Сделано (день 1)
+## Сделано
 
-- Пакет `src/admin/`: `constants`, `templates_env`, `csrf`, `csp`, `lifespan`.
-- Роутер `src/admin/routers/health.py`, подключение в `admin_main.py`.
-- `admin_main.py` — реэкспорт `_admin_asset_version` / `_admin_csp_value` для существующих тестов.
+- День 1: пакет `src/admin/` (`constants`, `templates_env`, `csrf`, `csp`, `lifespan`), `routers/health.py`.
+- День 2–3: `runtime.py`, `session_logic.py`, `timeutil.py`, `middleware/auth.py` (сессии + CSRF cookie).
 
 ## Дальше по дням
 
 | День | Задача |
 |------|--------|
-| 2 | `src/admin/runtime.py`: логгер, `SimpleRateLimiter`, кэши; `session_logic.py`: `_has_admin`, `_integration_status`, `_runtime_status_from_file` |
-| 3 | `src/admin/middleware/auth.py` — `AuthMiddleware`; в `admin_main` только `app.add_middleware` |
 | 4 | Роутер `routers/auth.py` (login, setup, forgot/reset, logout, onboarding) |
-| 5 | Роутер `routers/users.py` или `ops.py` + остальное порциями; финальный тонкий `admin_main` |
+| 5 | Роутер `users` / `ops` / остальное порциями; тонкий `admin_main` |
 
 ## Инварианты
 
