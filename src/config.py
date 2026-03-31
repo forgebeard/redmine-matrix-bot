@@ -50,22 +50,6 @@ def resolved_log_file() -> Path:
 LOG_FILE = resolved_log_file()
 
 # ═══════════════════════════════════════════════════════════════
-# MATRIX
-# ═══════════════════════════════════════════════════════════════
-
-MATRIX_HOMESERVER = os.getenv("MATRIX_HOMESERVER")
-MATRIX_ACCESS_TOKEN = os.getenv("MATRIX_ACCESS_TOKEN")
-MATRIX_USER_ID = os.getenv("MATRIX_USER_ID")
-MATRIX_DEVICE_ID = os.getenv("MATRIX_DEVICE_ID")
-
-# ═══════════════════════════════════════════════════════════════
-# REDMINE
-# ═══════════════════════════════════════════════════════════════
-
-REDMINE_URL = os.getenv("REDMINE_URL")
-REDMINE_API_KEY = os.getenv("REDMINE_API_KEY")
-
-# ═══════════════════════════════════════════════════════════════
 # ТАЙМЗОНА
 # ═══════════════════════════════════════════════════════════════
 
@@ -187,16 +171,17 @@ def should_notify(user_cfg: dict, notification_type: str) -> bool:
 
 
 def validate_required_env() -> tuple[bool, list[str]]:
-    """Проверяет наличие обязательных переменных окружения."""
+    """Проверяет bootstrap-переменные окружения (без интеграционных секретов)."""
     errors = []
-    required = {
-        "MATRIX_HOMESERVER": MATRIX_HOMESERVER,
-        "MATRIX_ACCESS_TOKEN": MATRIX_ACCESS_TOKEN,
-        "MATRIX_USER_ID": MATRIX_USER_ID,
-        "REDMINE_URL": REDMINE_URL,
-        "REDMINE_API_KEY": REDMINE_API_KEY,
-    }
-    for name, value in required.items():
-        if not value:
-            errors.append(f"Не задана переменная {name}")
+    has_db_url = bool((os.getenv("DATABASE_URL") or "").strip())
+    has_pg_parts = all(
+        bool((os.getenv(n) or "").strip())
+        for n in ("POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DB", "POSTGRES_HOST", "POSTGRES_PORT")
+    )
+    if not has_db_url and not has_pg_parts:
+        errors.append("Не задан DATABASE_URL и отсутствует полный набор POSTGRES_*")
+    has_master_key_file = bool((os.getenv("APP_MASTER_KEY_FILE") or "").strip())
+    has_master_key = bool((os.getenv("APP_MASTER_KEY") or "").strip())
+    if not has_master_key_file and not has_master_key:
+        errors.append("Не задан APP_MASTER_KEY_FILE/APP_MASTER_KEY для шифрования секретов")
     return len(errors) == 0, errors

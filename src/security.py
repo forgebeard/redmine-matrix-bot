@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import os
 import re
-import secrets
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -64,10 +63,6 @@ def validate_password_policy(password: str, email: str = "") -> tuple[bool, str 
 
 def token_hash(value: str, salt: str) -> str:
     return hashlib.sha256((value + salt).encode("utf-8")).hexdigest()
-
-
-def make_reset_token() -> str:
-    return secrets.token_urlsafe(32)
 
 
 def load_master_key() -> bytes:

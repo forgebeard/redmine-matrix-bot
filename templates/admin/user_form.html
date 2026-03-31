@@ -29,6 +29,16 @@
 
   <div class="field">
     <label for="redmine_search_q">Поиск в Redmine (имя/логин)</label>
+    {% set _rh = redmine_search_health if redmine_search_health is defined else None %}
+    {% if _rh %}
+      {% if _rh.status == "ok" %}
+      <p class="field-hint">Статус Redmine users API: <strong>OK</strong> — {{ _rh.detail }}</p>
+      {% elif _rh.status in ["forbidden", "unauthorized"] %}
+      <p class="error">Статус Redmine users API: <strong>{{ _rh.status }}</strong> — {{ _rh.detail }}</p>
+      {% else %}
+      <p class="field-hint">Статус Redmine users API: <strong>{{ _rh.status }}</strong> — {{ _rh.detail }}</p>
+      {% endif %}
+    {% endif %}
     <input
       type="text"
       id="redmine_search_q"

@@ -8,7 +8,6 @@ import pytest
 
 # Для password auth и encrypted-secrets на старте нужен master key.
 os.environ.setdefault("APP_MASTER_KEY", "0123456789abcdef0123456789abcdef")
-os.environ.setdefault("SMTP_MOCK", "1")
 
 import admin_main  # noqa: E402
 
@@ -26,20 +25,12 @@ def test_health_ok(client: TestClient):
     assert r.headers.get("x-frame-options") == "DENY"
 
 
-def test_health_smtp_ok_in_mock_mode(client: TestClient):
-    r = client.get("/health/smtp")
-    assert r.status_code == 200
-    payload = r.json()
-    assert payload["status"] == "ok"
-
-
 def test_login_page_ok(client: TestClient):
     r = client.get("/login")
     assert r.status_code == 200
     assert "Вход в панель" in r.text
-    assert "Email" in r.text
+    assert "Login" in r.text
     assert "Пароль" in r.text
-    assert "Забыли пароль?" in r.text
     assert "/static/admin/css/auth.css?v=" in r.text
 
 
@@ -95,13 +86,34 @@ def test_setup_creates_first_admin(client: TestClient):
     r = client.post(
         "/setup",
         data={
-            "email": "first_admin@example.com",
+            "login": "first_admin",
             "password": "StrongPassword123",
+            "password_confirm": "StrongPassword123",
             "csrf_token": token,
         },
         follow_redirects=False,
     )
     assert r.status_code in (302, 303)
+
+
+def test_setup_rejects_password_mismatch(client: TestClient):
+    db_url = os.getenv("DATABASE_URL", "")
+    if not db_url or not db_url.startswith("postgresql://"):
+        pytest.skip("Тест требует Postgres (DATABASE_URL)")
+    page = client.get("/setup")
+    token = page.cookies.get("admin_csrf")
+    r = client.post(
+        "/setup",
+        data={
+            "login": "first_admin",
+            "password": "StrongPassword123",
+            "password_confirm": "StrongPassword1234",
+            "csrf_token": token,
+        },
+        follow_redirects=False,
+    )
+    assert r.status_code == 400
+    assert "Пароли не совпадают" in r.text
 
 
 def test_users_redirects_to_login_without_auth(client: TestClient):
@@ -115,14 +127,14 @@ def _setup_and_login_admin(client: TestClient, email: str = "test_admin@example.
     token = setup.cookies.get("admin_csrf")
     client.post(
         "/setup",
-        data={"email": email, "password": password, "csrf_token": token},
+        data={"login": email, "password": password, "password_confirm": password, "csrf_token": token},
         follow_redirects=False,
     )
     login = client.get("/login")
     ltoken = login.cookies.get("admin_csrf")
     client.post(
         "/login",
-        data={"email": email, "password": password, "csrf_token": ltoken},
+        data={"login": email, "password": password, "csrf_token": ltoken},
         follow_redirects=True,
     )
 
@@ -149,6 +161,22 @@ def test_groups_page_requires_auth(client: TestClient):
     r = client.get("/groups", follow_redirects=False)
     assert r.status_code in (301, 302, 303, 307, 308)
     assert r.headers.get("location", "").endswith("/login")
+
+
+def test_redmine_search_health_endpoint_requires_auth(client: TestClient):
+    r = client.get("/redmine/search/health", follow_redirects=False)
+    assert r.status_code in (301, 302, 303, 307, 308)
+
+
+def test_redmine_search_health_not_configured(client: TestClient):
+    db_url = os.getenv("DATABASE_URL", "")
+    if not db_url or not db_url.startswith("postgresql://"):
+        pytest.skip("Тест требует Postgres (DATABASE_URL)")
+    _setup_and_login_admin(client, email="health_admin@example.com")
+    r = client.get("/redmine/search/health")
+    assert r.status_code == 200
+    payload = r.json()
+    assert payload["status"] == "not_configured"
 
 
 def test_ops_restart_accepts_and_redirects(client: TestClient, monkeypatch):

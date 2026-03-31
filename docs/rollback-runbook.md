@@ -44,12 +44,11 @@ cat ./pre_release.sql | docker compose exec -T postgres sh -lc 'psql -U "$POSTGR
 ```bash
 curl -sSf http://localhost:8080/health/live
 curl -sSf http://localhost:8080/health/ready
-curl -sS http://localhost:8080/health/smtp
 ```
 
 ## 6) Восстановление админ-доступа при аварии
 
 ```bash
-python scripts/reset_admin_password.py --email admin@example.com --password 'NewStrongPassword123'
+python scripts/reset_admin_password.py --login admin --password 'NewStrongPassword123'
 ```
 

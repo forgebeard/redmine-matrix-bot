@@ -173,7 +173,7 @@ cd src && python3 -c "from config import validate_required_env; ok, m = validate
 python -m pytest tests/ -v --tb=short --ignore=tests/e2e
 ```
 
-**E2E (Playwright)** — `tests/e2e/`: поднимают отдельный `uvicorn` и Chromium. Нужны `DATABASE_URL` на Postgres, после установки браузера: `python -m playwright install chromium`. Полный сценарий входа выполняется либо при пустой БД (одноразовая регистрация через `/setup` в фикстуре), либо при заданных **`E2E_ADMIN_EMAIL`** и **`E2E_ADMIN_PASSWORD`** в окружении.
+**E2E (Playwright)** — `tests/e2e/`: поднимают отдельный `uvicorn` и Chromium. Нужны `DATABASE_URL` на Postgres, после установки браузера: `python -m playwright install chromium`. Полный сценарий входа выполняется либо при пустой БД (одноразовая регистрация через `/setup` в фикстуре), либо при заданных **`E2E_ADMIN_LOGIN`** (или legacy `E2E_ADMIN_EMAIL`) и **`E2E_ADMIN_PASSWORD`** в окружении.
 
 ```bash
 python -m pytest tests/e2e/ -v --tb=short
@@ -241,8 +241,8 @@ docker compose down
 ### Админка и конфиг в БД
 
 1. После `docker compose up` откройте `http://<хост>:8080/setup` и создайте первого admin (только если admin ещё нет в БД).
-2. Вход в админку: `http://<хост>:8080/login` по `email + password`.
-3. Восстановление пароля: `http://<хост>:8080/forgot-password` → одноразовый reset token.
+2. Вход в админку: `http://<хост>:8080/login` по `login + password`.
+3. Аварийная смена пароля admin выполняется через CLI-скрипт (см. ниже), а не через email-flow.
 4. Заполните пользователей, маршруты и секреты в админке; затем перезапустите сервис **`bot`** (бот читает конфиг при старте).
 5. Для дедупликации на нескольких инстансах используется lease по пользователю (`bot_user_leases`) и state в `bot_issue_state`.
 
@@ -265,30 +265,23 @@ docker compose up -d bot
 
 ## Настройка .env
 
+`.env` используется только для bootstrap-инфраструктуры (БД, cookie/security, runtime flags).
+Интеграционные секреты (`REDMINE_URL`, `REDMINE_API_KEY`, `MATRIX_*`) заполняются в Admin UI (`/onboarding` / `Интеграции`) и хранятся в БД в зашифрованном виде.
+
+Минимальный пример:
+
 ```env
-# ─── Matrix-сервер ───────────────────────────────────
-MATRIX_HOMESERVER=https://messenger.example.com
-MATRIX_ACCESS_TOKEN=syt_your_access_token_here
-MATRIX_USER_ID=@bot_user:messenger.example.com
-MATRIX_DEVICE_ID=BOTDEVICE
+POSTGRES_USER=bot
+POSTGRES_PASSWORD=change-me
+POSTGRES_PASSWORD_URLENC=change-me
+POSTGRES_DB=redmine_matrix
+POSTGRES_HOST=postgres
+POSTGRES_PORT=5432
 
-# ─── Redmine ─────────────────────────────────────────
-REDMINE_URL=https://redmine.example.com
-REDMINE_API_KEY=your_redmine_api_key
+APP_MASTER_KEY_FILE=/run/secrets/app_master_key
+AUTH_TOKEN_SALT=dev-change-me-in-prod
+COOKIE_SECURE=0
 ```
-
-### Где взять токены
-
-| Параметр | Где получить |
-|----------|-------------|
-| `MATRIX_ACCESS_TOKEN` | Element → Настройки → Помощь и О программе → Access Token |
-| `MATRIX_USER_ID` | Формат: `@username:your.server` |
-| `MATRIX_DEVICE_ID` | Любой идентификатор (например, `BOTDEVICE`) |
-| `REDMINE_API_KEY` | Redmine → Моя учётная запись → API-ключ (правая колонка) |
-
-> ⚠️ **Важно:** Бот использует `access_token` (не пароль) для авторизации в Matrix — это безопаснее и не требует login-flow.
-
-> ⚠️ **Важно:** API-ключ Redmine определяет, чьи задачи бот может видеть. Рекомендуется использовать ключ с правами администратора, если бот обслуживает нескольких пользователей.
 
 ### Логи (опционально)
 
@@ -302,39 +295,22 @@ REDMINE_API_KEY=your_redmine_api_key
 
 | Переменная | Назначение |
 |------------|------------|
-| `AUTH_TOKEN_SALT` | Соль для hash reset-токенов |
+| `AUTH_TOKEN_SALT` | Соль для auth-токенов/кодов |
 | `SESSION_TTL_SECONDS` | Время жизни admin-сессии |
-| `RESET_TOKEN_TTL_SECONDS` | TTL токена сброса пароля |
-| `RESET_COOLDOWN_SECONDS` | Ограничение частоты reset-запросов |
 | `COOKIE_SECURE` | Secure-флаг cookie (`1` для HTTPS) |
 | `APP_MASTER_KEY_FILE` | Путь к master key (32 байта) |
-| `SHOW_DEV_TOKENS` | Показ dev reset-токена в UI (только dev/test) |
-
-### SMTP reset
-
-| Переменная | Назначение |
-|------------|------------|
-| `SMTP_HOST` | SMTP сервер |
-| `SMTP_PORT` | SMTP порт |
-| `SMTP_USERNAME` | SMTP логин |
-| `SMTP_PASSWORD` | SMTP пароль |
-| `SMTP_SENDER` | Email отправителя |
-| `SMTP_USE_TLS` / `SMTP_USE_STARTTLS` | Режим транспортной защиты |
-| `SMTP_MOCK` | dev/test режим без реальной отправки (в production должен быть `0`) |
-| `SMTP_HEALTH_TTL_SECONDS` | TTL кэша проверки SMTP |
 
 ### Health endpoints
 
 - `GET /health/live` — процесс поднят.
 - `GET /health/ready` — доступны БД и master key.
-- `GET /health/smtp` — состояние SMTP (`ok/degraded`), не блокирует запуск приложения.
 
 ### Recovery
 
 Аварийный сброс пароля администратора:
 
 ```bash
-python scripts/reset_admin_password.py --email admin@example.com --password 'NewStrongPassword123'
+python scripts/reset_admin_password.py --login admin --password 'NewStrongPassword123'
 ```
 
 Полный регламент отката: `docs/rollback-runbook.md`.
@@ -627,9 +603,9 @@ python3 bot.py 2>&1 | head -30
 
 ### Бот не отправляет уведомления
 
-1. Проверьте `MATRIX_ACCESS_TOKEN` — токен может быть просрочен
+1. Проверьте раздел `Интеграции` в админке: `MATRIX_ACCESS_TOKEN` может быть просрочен
 2. Проверьте, что бот присоединён к комнатам Matrix (пригласите его)
-3. Проверьте `REDMINE_API_KEY` — ключ должен иметь доступ к задачам
+3. Проверьте в `Интеграции`, что `REDMINE_API_KEY` валиден и имеет доступ к задачам
 4. Проверьте Redmine user ID в `config.yaml` — ID в URL профиля
 5. Посмотрите лог: `tail -50 data/bot.log`
 
@@ -646,7 +622,7 @@ docker compose restart bot
 
 - В `bot.py` отправка повторяется до **3** раз с паузами **1 с** и **2 с** (экспоненциально).
 - Проверьте, что бот-пользователь создан и приглашён в комнаты.
-- Проверьте `MATRIX_HOMESERVER` — URL должен быть доступен с сервера бота.
+- Проверьте в `Интеграции` значение `MATRIX_HOMESERVER` — URL должен быть доступен с сервера бота.
 
 ### Тесты падают
 

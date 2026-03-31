@@ -6,7 +6,6 @@ from .models import (
     BotAppUser,
     BotIssueState,
     BotMagicToken,
-    PasswordResetToken,
     BotUser,
     BotUserLease,
     BotSession,
@@ -25,7 +24,6 @@ __all__ = [
     "BotAppUser",
     "BotMagicToken",
     "BotSession",
-    "PasswordResetToken",
     "AppSecret",
     "MatrixRoomBinding",
 ]

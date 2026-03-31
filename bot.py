@@ -56,15 +56,13 @@ load_dotenv()
 # НАСТРОЙКИ ИЗ .env
 # ═══════════════════════════════════════════════════════════════════════════
 
-# --- Matrix ---
-HOMESERVER       = os.getenv("MATRIX_HOMESERVER")
-ACCESS_TOKEN     = os.getenv("MATRIX_ACCESS_TOKEN")
-MATRIX_USER_ID   = os.getenv("MATRIX_USER_ID")
-MATRIX_DEVICE_ID = os.getenv("MATRIX_DEVICE_ID")
-
-# --- Redmine ---
-REDMINE_URL = os.getenv("REDMINE_URL")
-REDMINE_KEY = os.getenv("REDMINE_API_KEY")
+# --- Matrix / Redmine (loaded from encrypted AppSecret in DB at runtime) ---
+HOMESERVER: str | None = None
+ACCESS_TOKEN: str | None = None
+MATRIX_USER_ID: str | None = None
+MATRIX_DEVICE_ID: str | None = None
+REDMINE_URL: str | None = None
+REDMINE_KEY: str | None = None
 
 # --- Таймзона ---
 BOT_TZ = ZoneInfo(os.getenv("BOT_TIMEZONE", "Europe/Moscow"))
@@ -1002,12 +1000,49 @@ async def cleanup_state_files(redmine):
 
 async def main():
     global USERS, STATUS_ROOM_MAP, VERSION_ROOM_MAP
+    global HOMESERVER, ACCESS_TOKEN, MATRIX_USER_ID, MATRIX_DEVICE_ID, REDMINE_URL, REDMINE_KEY
 
     logger.info("🚀 Бот запущен")
 
-    # --- Проверка обязательных настроек ---
+    # --- Интеграции берём из encrypted secrets в БД ---
+    try:
+        from sqlalchemy import select
+
+        from database.models import AppSecret
+        from database.session import get_session_factory
+        from security import decrypt_secret, load_master_key
+
+        key = load_master_key()
+        needed = [
+            "MATRIX_HOMESERVER",
+            "MATRIX_ACCESS_TOKEN",
+            "MATRIX_USER_ID",
+            "MATRIX_DEVICE_ID",
+            "REDMINE_URL",
+            "REDMINE_API_KEY",
+        ]
+        factory = get_session_factory()
+        async with factory() as s:
+            r = await s.execute(select(AppSecret).where(AppSecret.name.in_(needed)))
+            rows = list(r.scalars().all())
+        sec: dict[str, str] = {}
+        for row in rows:
+            try:
+                sec[row.name] = decrypt_secret(row.ciphertext, row.nonce, key).strip()
+            except Exception:
+                continue
+        HOMESERVER = (sec.get("MATRIX_HOMESERVER") or "").strip()
+        ACCESS_TOKEN = (sec.get("MATRIX_ACCESS_TOKEN") or "").strip()
+        MATRIX_USER_ID = (sec.get("MATRIX_USER_ID") or "").strip()
+        MATRIX_DEVICE_ID = (sec.get("MATRIX_DEVICE_ID") or "").strip()
+        REDMINE_URL = (sec.get("REDMINE_URL") or "").strip()
+        REDMINE_KEY = (sec.get("REDMINE_API_KEY") or "").strip()
+    except Exception as e:
+        logger.error("❌ Не удалось загрузить интеграционные секреты из БД: %s", e, exc_info=True)
+        return
+
     if not all([HOMESERVER, ACCESS_TOKEN, MATRIX_USER_ID, REDMINE_URL, REDMINE_KEY]):
-        logger.error("❌ Не заданы обязательные переменные в .env")
+        logger.error("❌ Интеграции не настроены в админке (/onboarding)")
         return
 
     # Бот всегда стартует в DB-only режиме: конфиг берём из Postgres.
@@ -1049,7 +1084,7 @@ async def main():
     client = AsyncClient(HOMESERVER)
     client.access_token = ACCESS_TOKEN
     client.user_id      = MATRIX_USER_ID
-    client.device_id    = MATRIX_DEVICE_ID
+    client.device_id    = MATRIX_DEVICE_ID or "BOT"
 
     try:
         resp = await client.whoami()

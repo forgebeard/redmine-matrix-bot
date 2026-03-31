@@ -18,16 +18,16 @@
 
 ## Что остается в .env
 
-Полностью отказаться от `.env` пока нельзя, потому что там остаются:
+Полностью отказаться от `.env` пока нельзя, потому что там остаются bootstrap-параметры:
 
 - системные параметры запуска (`POSTGRES_*`, `ADMIN_PORT`, `COOKIE_SECURE`, TTL и т.д.),
-- параметры подключения к Matrix/Redmine (если они не перенесены в `app_secrets`),
-- служебные флаги/соли (`AUTH_TOKEN_SALT` и т.д.).
+- служебные флаги/соли (`AUTH_TOKEN_SALT` и т.д.),
+- путь/значение master key (`APP_MASTER_KEY_FILE`/`APP_MASTER_KEY`).
 
 ## Что не хранится в открытом виде
 
 - Пароли админ-пользователей не хранятся в plaintext: только `Argon2id` hash в `bot_app_users.password_hash`.
-- Reset-токены не хранятся в открытом виде: только hash в `password_reset_tokens`.
+- Сброс пароля admin выполняется только через CLI-скрипт `scripts/reset_admin_password.py` (публичного email-reset flow нет).
 
 ## Рекомендации по эксплуатации
 

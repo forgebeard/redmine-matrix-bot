@@ -2,7 +2,7 @@
 Веб-админка: пользователи бота и маршруты Matrix (Postgres).
 
 Запуск: uvicorn admin_main:app --host 0.0.0.0 --port 8080
-Требуется DATABASE_URL (доступ к UI — через email/password).
+Требуется DATABASE_URL (доступ к UI — через login/password).
 """
 
 from __future__ import annotations
@@ -45,20 +45,17 @@ from database.models import (
     BotSession,
     BotUser,
     MatrixRoomBinding,
-    PasswordResetToken,
     StatusRoomRoute,
     SupportGroup,
     VersionRoomRoute,
 )
 from database.session import get_session, get_session_factory
-from mail import check_smtp_health, mask_email, send_reset_email
 from security import (
     SecurityError,
+    decrypt_secret,
     encrypt_secret,
     hash_password,
     load_master_key,
-    make_reset_token,
-    token_hash,
     validate_password_policy,
     verify_password,
 )
@@ -139,11 +136,8 @@ ADMIN_ENABLE_RUNTIME_OPS = (os.getenv("ADMIN_ENABLE_RUNTIME_OPS", "0").strip().l
 
 AUTH_TOKEN_SALT = os.getenv("AUTH_TOKEN_SALT", "dev-token-salt")
 SESSION_TTL_SECONDS = int(os.getenv("SESSION_TTL_SECONDS", "86400"))
-RESET_TOKEN_TTL_SECONDS = int(os.getenv("RESET_TOKEN_TTL_SECONDS", "1800"))
-RESET_COOLDOWN_SECONDS = int(os.getenv("RESET_COOLDOWN_SECONDS", "90"))
 
 APP_MASTER_KEY_FILE = os.getenv("APP_MASTER_KEY_FILE", "/run/secrets/app_master_key")
-SHOW_DEV_TOKENS = os.getenv("SHOW_DEV_TOKENS", "0").strip().lower() in ("1", "true", "yes", "on")
 ADMIN_EXISTS_CACHE_TTL_SECONDS = int(os.getenv("ADMIN_EXISTS_CACHE_TTL_SECONDS", "20"))
 INTEGRATION_STATUS_CACHE_TTL_SECONDS = int(os.getenv("INTEGRATION_STATUS_CACHE_TTL_SECONDS", "30"))
 REQUIRED_SECRET_NAMES = [
@@ -183,8 +177,18 @@ def _token_hash(value: str) -> str:
     return hashlib.sha256((value + AUTH_TOKEN_SALT).encode("utf-8")).hexdigest()
 
 
+def mask_email(email: str) -> str:
+    e = (email or "").strip()
+    if "@" not in e:
+        return "***"
+    local, domain = e.split("@", 1)
+    if len(local) <= 2:
+        return f"{local[0]}***@{domain}" if local else f"***@{domain}"
+    return f"{local[:2]}***@{domain}"
+
+
 def _generic_login_error() -> str:
-    return "Неверный email или пароль"
+    return "Неверный login или пароль"
 
 
 def _client_ip(request: Request) -> str:
@@ -332,6 +336,26 @@ class _RedmineSearchBreaker:
 _redmine_search_breaker = _RedmineSearchBreaker()
 
 
+class _RedmineSearchHealthCache:
+    def __init__(self):
+        self.value: dict | None = None
+        self.expires_ts: float = 0.0
+
+    def get(self) -> dict | None:
+        if self.value is None:
+            return None
+        if datetime.now().timestamp() >= self.expires_ts:
+            return None
+        return self.value
+
+    def set(self, value: dict, ttl_s: int = 60) -> None:
+        self.value = value
+        self.expires_ts = datetime.now().timestamp() + max(5, ttl_s)
+
+
+_redmine_search_health_cache = _RedmineSearchHealthCache()
+
+
 _process_started_at = time.monotonic()
 _ops_jobs: dict[str, dict] = {}
 
@@ -340,15 +364,67 @@ def _runtime_status_from_file() -> dict:
     p = Path(RUNTIME_STATUS_FILE)
     if not p.exists():
         return {}
-
-
-def _ops_enabled() -> bool:
-    return ADMIN_ENABLE_RUNTIME_OPS
     try:
         raw = json.loads(p.read_text(encoding="utf-8"))
         return raw if isinstance(raw, dict) else {}
     except Exception:
         return {}
+
+
+async def _get_app_secrets(session: AsyncSession, names: list[str]) -> dict[str, str]:
+    if not names:
+        return {}
+    rows = await session.execute(select(AppSecret).where(AppSecret.name.in_(names)))
+    items = list(rows.scalars().all())
+    if not items:
+        return {}
+    key = load_master_key()
+    out: dict[str, str] = {}
+    for row in items:
+        try:
+            out[row.name] = decrypt_secret(row.ciphertext, row.nonce, key).strip()
+        except Exception:
+            continue
+    return out
+
+
+async def _redmine_search_health_check(session: AsyncSession, force: bool = False) -> dict:
+    cached = None if force else _redmine_search_health_cache.get()
+    if cached is not None:
+        return cached
+    secrets_map = await _get_app_secrets(session, ["REDMINE_URL", "REDMINE_API_KEY"])
+    redmine_url = (secrets_map.get("REDMINE_URL") or "").strip()
+    redmine_api_key = (secrets_map.get("REDMINE_API_KEY") or "").strip()
+    if not redmine_url or not redmine_api_key:
+        out = {"status": "not_configured", "detail": "REDMINE_URL или REDMINE_API_KEY не задан"}
+        _redmine_search_health_cache.set(out, ttl_s=30)
+        return out
+    from urllib.error import HTTPError, URLError
+    from urllib.request import Request, urlopen
+
+    base = redmine_url.rstrip("/")
+    req = Request(f"{base}/users.json?limit=1", headers={"X-Redmine-API-Key": redmine_api_key})
+    try:
+        with urlopen(req, timeout=5.0) as r:
+            _ = r.read()
+            out = {"status": "ok", "detail": "Доступ к users API есть"}
+    except HTTPError as e:
+        if e.code == 403:
+            out = {"status": "forbidden", "detail": "403: ключ не имеет прав на users API"}
+        elif e.code == 401:
+            out = {"status": "unauthorized", "detail": "401: неверный API key"}
+        else:
+            out = {"status": f"http_{e.code}", "detail": f"HTTP {e.code} от Redmine"}
+    except URLError:
+        out = {"status": "timeout", "detail": "Таймаут/недоступен Redmine"}
+    except Exception:
+        out = {"status": "error", "detail": "Неизвестная ошибка проверки Redmine"}
+    _redmine_search_health_cache.set(out, ttl_s=60)
+    return out
+
+
+def _ops_enabled() -> bool:
+    return ADMIN_ENABLE_RUNTIME_OPS
 
 
 async def _has_admin(session: AsyncSession, use_cache: bool = True) -> bool:
@@ -383,7 +459,7 @@ async def _integration_status(session: AsyncSession, use_cache: bool = True) -> 
 
 class AuthMiddleware(BaseHTTPMiddleware):
     """
-    Auth для админки через DB-сессии после login по email/password.
+    Auth для админки через DB-сессии после login по login/password.
     """
 
     async def dispatch(self, request: Request, call_next):
@@ -392,12 +468,9 @@ class AuthMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
         if p in (
             "/login",
-            "/forgot-password",
-            "/reset-password",
             "/health",
             "/health/live",
             "/health/ready",
-            "/health/smtp",
             SETUP_PATH,
         ) or p.startswith("/docs") or p in (
             "/openapi.json",
@@ -473,10 +546,6 @@ class AuthMiddleware(BaseHTTPMiddleware):
         return response
 
 
-REDMINE_URL = (os.getenv("REDMINE_URL") or "").strip()
-REDMINE_API_KEY = (os.getenv("REDMINE_API_KEY") or "").strip()
-
-
 app.add_middleware(AuthMiddleware)
 
 
@@ -514,24 +583,6 @@ async def health_ready(session: AsyncSession = Depends(get_session)):
     return {"status": "ready"}
 
 
-@app.get("/health/smtp")
-async def health_smtp():
-    health = check_smtp_health()
-    code = 200 if health.ok else 503
-    return HTMLResponse(
-        content=json.dumps(
-            {
-                "status": "ok" if health.ok else "degraded",
-                "detail": health.detail,
-                "checked_at": health.checked_at,
-            },
-            ensure_ascii=False,
-        ),
-        status_code=code,
-        media_type="application/json",
-    )
-
-
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
     csrf_token, set_cookie = _ensure_csrf(request)
@@ -567,7 +618,7 @@ async def setup_page(request: Request, session: AsyncSession = Depends(get_sessi
     resp = templates.TemplateResponse(
         request,
         "setup.html",
-        {"error": None, "csrf_token": csrf_token},
+        {"error": None, "csrf_token": csrf_token, "login": ""},
     )
     if set_cookie:
         resp.set_cookie(
@@ -583,26 +634,35 @@ async def setup_page(request: Request, session: AsyncSession = Depends(get_sessi
 @app.post(SETUP_PATH)
 async def setup_post(
     request: Request,
-    email: Annotated[str, Form()],
     password: Annotated[str, Form()],
+    login: Annotated[str, Form()] = "",
+    email: Annotated[str, Form()] = "",
+    password_confirm: Annotated[str, Form()] = "",
     csrf_token: Annotated[str, Form()] = "",
     session: AsyncSession = Depends(get_session),
 ):
     _verify_csrf(request, csrf_token)
-    email = (email or "").strip().lower()
-    if not email or "@" not in email:
+    login = (login or email or "").strip().lower()
+    if not login:
         return templates.TemplateResponse(
             request,
             "setup.html",
-            {"error": "Введите корректный email", "csrf_token": csrf_token},
+            {"error": "Введите корректный login", "csrf_token": csrf_token, "login": login},
             status_code=400,
         )
-    ok, reason = validate_password_policy(password, email=email)
+    if password != (password_confirm or ""):
+        return templates.TemplateResponse(
+            request,
+            "setup.html",
+            {"error": "Пароли не совпадают", "csrf_token": csrf_token, "login": login},
+            status_code=400,
+        )
+    ok, reason = validate_password_policy(password, email=login)
     if not ok:
         return templates.TemplateResponse(
             request,
             "setup.html",
-            {"error": reason, "csrf_token": csrf_token},
+            {"error": reason, "csrf_token": csrf_token, "login": login},
             status_code=400,
         )
     # Protect from race: lock admin rows.
@@ -616,12 +676,12 @@ async def setup_post(
         return templates.TemplateResponse(
             request,
             "setup.html",
-            {"error": "Администратор уже создан", "csrf_token": csrf_token},
+            {"error": "Администратор уже создан", "csrf_token": csrf_token, "login": login},
             status_code=409,
         )
     user = BotAppUser(
         id=uuid.uuid4(),
-        email=email,
+        email=login,
         role="admin",
         verified_at=_now_utc(),
         password_hash=hash_password(password),
@@ -635,8 +695,9 @@ async def setup_post(
 @app.post("/login")
 async def login_post(
     request: Request,
-    email: Annotated[str, Form()],
     password: Annotated[str, Form()],
+    login: Annotated[str, Form()] = "",
+    email: Annotated[str, Form()] = "",
     csrf_token: Annotated[str, Form()] = "",
     session: AsyncSession = Depends(get_session),
 ):
@@ -645,15 +706,15 @@ async def login_post(
     if not _rate_limiter.hit(f"login:ip:{ip}", limit=5, window_seconds=60):
         raise HTTPException(429, "Слишком много попыток, попробуйте позже")
 
-    email = (email or "").strip().lower()
-    if not email or not password:
+    login = (login or email or "").strip().lower()
+    if not login or not password:
         return templates.TemplateResponse(
             request,
             "login.html",
             {"error": _generic_login_error(), "csrf_token": csrf_token},
             status_code=401,
         )
-    r = await session.execute(select(BotAppUser).where(BotAppUser.email == email))
+    r = await session.execute(select(BotAppUser).where(BotAppUser.email == login))
     user = r.scalar_one_or_none()
     if not user or not user.password_hash or not verify_password(user.password_hash, password):
         return templates.TemplateResponse(
@@ -760,145 +821,6 @@ async def onboarding_skip(
         session.add(AppSecret(name=ONBOARDING_SKIPPED_SECRET, ciphertext=enc.ciphertext, nonce=enc.nonce, key_version=enc.key_version))
     _integration_status_cache.invalidate()
     return RedirectResponse("/", status_code=303)
-
-
-@app.get("/forgot-password", response_class=HTMLResponse)
-async def forgot_password_page(request: Request):
-    csrf_token, set_cookie = _ensure_csrf(request)
-    resp = templates.TemplateResponse(
-        request,
-        "forgot_password.html",
-        {"error": None, "ok": None, "csrf_token": csrf_token},
-    )
-    if set_cookie:
-        resp.set_cookie(CSRF_COOKIE_NAME, csrf_token, httponly=True, secure=COOKIE_SECURE, samesite="lax")
-    return resp
-
-
-@app.post("/forgot-password", response_class=HTMLResponse)
-async def forgot_password_post(
-    request: Request,
-    email: Annotated[str, Form()],
-    csrf_token: Annotated[str, Form()] = "",
-    session: AsyncSession = Depends(get_session),
-):
-    _verify_csrf(request, csrf_token)
-    email = (email or "").strip().lower()
-    ip = _client_ip(request)
-    if not _rate_limiter.hit(f"forgot:ip:{ip}", limit=5, window_seconds=60):
-        raise HTTPException(429, "Слишком много попыток, попробуйте позже")
-    if not _rate_limiter.hit(f"forgot:email:{email}", limit=3, window_seconds=3600):
-        return templates.TemplateResponse(
-            request,
-            "forgot_password.html",
-            {"error": "Слишком много запросов сброса, попробуйте позже", "ok": None, "csrf_token": csrf_token},
-            status_code=429,
-        )
-    r = await session.execute(select(BotAppUser).where(BotAppUser.email == email))
-    user = r.scalar_one_or_none()
-    # Response must stay generic and not leak if user exists.
-    if user:
-        token = make_reset_token()
-        row = PasswordResetToken(
-            id=uuid.uuid4(),
-            user_id=user.id,
-            token_hash=token_hash(token, AUTH_TOKEN_SALT),
-            requested_email=email,
-            expires_at=_now_utc() + timedelta(seconds=RESET_TOKEN_TTL_SECONDS),
-            used_at=None,
-        )
-        session.add(row)
-        await session.flush()
-        reset_url = f"{request.base_url}reset-password?token={token}"
-        sent, send_detail = send_reset_email(email, reset_url)
-        logger.info(
-            "password_reset_requested email=%s sent=%s detail=%s",
-            mask_email(email),
-            sent,
-            send_detail,
-        )
-        # Dev-mode helper: show token in UI only if explicitly enabled.
-        dev_token = token if SHOW_DEV_TOKENS else None
-        return templates.TemplateResponse(
-            request,
-            "forgot_password.html",
-            {
-                "error": None,
-                "ok": "Если email существует, ссылка на сброс отправлена.",
-                "dev_token": dev_token,
-                "csrf_token": csrf_token,
-            },
-        )
-    return templates.TemplateResponse(
-        request,
-        "forgot_password.html",
-        {"error": None, "ok": "Если email существует, ссылка на сброс отправлена.", "csrf_token": csrf_token},
-    )
-
-
-@app.get("/reset-password", response_class=HTMLResponse)
-async def reset_password_page(request: Request, token: str = ""):
-    csrf_token, set_cookie = _ensure_csrf(request)
-    resp = templates.TemplateResponse(
-        request,
-        "reset_password.html",
-        {"error": None, "token": token, "csrf_token": csrf_token},
-    )
-    if set_cookie:
-        resp.set_cookie(CSRF_COOKIE_NAME, csrf_token, httponly=True, secure=COOKIE_SECURE, samesite="lax")
-    return resp
-
-
-@app.post("/reset-password")
-async def reset_password_post(
-    request: Request,
-    token: Annotated[str, Form()],
-    password: Annotated[str, Form()],
-    csrf_token: Annotated[str, Form()] = "",
-    session: AsyncSession = Depends(get_session),
-):
-    _verify_csrf(request, csrf_token)
-    token = (token or "").strip()
-    if not token or not password:
-        return templates.TemplateResponse(
-            request,
-            "reset_password.html",
-            {"error": "Неверный или просроченный токен", "token": token, "csrf_token": csrf_token},
-            status_code=401,
-        )
-    now = _now_utc()
-    r = await session.execute(
-        select(PasswordResetToken).where(
-            PasswordResetToken.token_hash == token_hash(token, AUTH_TOKEN_SALT),
-            PasswordResetToken.used_at.is_(None),
-            PasswordResetToken.expires_at > now,
-        )
-    )
-    rt = r.scalar_one_or_none()
-    if not rt:
-        return templates.TemplateResponse(
-            request,
-            "reset_password.html",
-            {"error": "Неверный или просроченный токен", "token": token, "csrf_token": csrf_token},
-            status_code=401,
-        )
-    u = await session.execute(select(BotAppUser).where(BotAppUser.id == rt.user_id))
-    user = u.scalar_one_or_none()
-    if not user:
-        return RedirectResponse("/login", status_code=303)
-    ok, reason = validate_password_policy(password, email=user.email)
-    if not ok:
-        return templates.TemplateResponse(
-            request,
-            "reset_password.html",
-            {"error": reason, "token": token, "csrf_token": csrf_token},
-            status_code=400,
-        )
-    user.password_hash = hash_password(password)
-    user.session_version = (user.session_version or 1) + 1
-    rt.used_at = now
-    await session.execute(delete(BotSession).where(BotSession.user_id == user.id))
-    return RedirectResponse("/login", status_code=303)
 
 
 @app.get("/logout")
@@ -1410,6 +1332,7 @@ async def users_new(
             "notify_selected": ["all"],
             "groups": groups_rows,
             "bot_tz": os.getenv("BOT_TIMEZONE", "Europe/Moscow"),
+            "redmine_search_health": await _redmine_search_health_check(session),
         },
     )
 
@@ -1542,6 +1465,7 @@ async def users_edit(
             "notify_selected": row.notify or ["all"],
             "groups": groups_rows,
             "bot_tz": os.getenv("BOT_TIMEZONE", "Europe/Moscow"),
+            "redmine_search_health": await _redmine_search_health_check(session),
         },
     )
 
@@ -1624,6 +1548,7 @@ async def redmine_users_search(
     request: Request,
     q: str = "",
     limit: int = 20,
+    session: AsyncSession = Depends(get_session),
 ):
     """
     Возвращает HTML-параметры <option> для автозаполнения редмине_id.
@@ -1648,7 +1573,10 @@ async def redmine_users_search(
         logger.warning("Redmine search blocked due to cooldown")
         return HTMLResponse('<option value="">Поиск временно недоступен (cooldown)</option>')
 
-    if not REDMINE_URL or not REDMINE_API_KEY:
+    secrets_map = await _get_app_secrets(session, ["REDMINE_URL", "REDMINE_API_KEY"])
+    redmine_url = (secrets_map.get("REDMINE_URL") or "").strip()
+    redmine_api_key = (secrets_map.get("REDMINE_API_KEY") or "").strip()
+    if not redmine_url or not redmine_api_key:
         return HTMLResponse('<option value="">Redmine не настроен (нет URL/API key)</option>')
 
     def _do_search() -> tuple[list[dict], str | None]:
@@ -1670,23 +1598,23 @@ async def redmine_users_search(
             except Exception:
                 return [], "error"
 
-        base = REDMINE_URL.rstrip("/")
+        base = redmine_url.rstrip("/")
         base_params = {"name": q, "limit": str(limit_i)}
 
         # 1) Основной путь: API key в header.
         url = f"{base}/users.json?{urlencode(base_params)}"
-        users, err = _fetch_with(url, {"X-Redmine-API-Key": REDMINE_API_KEY})
+        users, err = _fetch_with(url, {"X-Redmine-API-Key": redmine_api_key})
         if err is None:
             return users, None
 
         # 2) Фолбэк: некоторые прокси/инстансы принимают key только в query.
         if err == "http_403":
-            url_q = f"{base}/users.json?{urlencode({**base_params, 'key': REDMINE_API_KEY})}"
+            url_q = f"{base}/users.json?{urlencode({**base_params, 'key': redmine_api_key})}"
             users2, err2 = _fetch_with(url_q)
             if err2 is None:
                 return users2, None
             # 3) Ещё один фолбэк: поиск по login (на части инстансов name ограничен).
-            url_login = f"{base}/users.json?{urlencode({'name': q, 'login': q, 'limit': str(limit_i), 'key': REDMINE_API_KEY})}"
+            url_login = f"{base}/users.json?{urlencode({'name': q, 'login': q, 'limit': str(limit_i), 'key': redmine_api_key})}"
             users3, err3 = _fetch_with(url_login)
             if err3 is None:
                 return users3, None
@@ -1724,6 +1652,18 @@ async def redmine_users_search(
     if not opts:
         return HTMLResponse('<option value="">Ничего не найдено</option>')
     return HTMLResponse("".join(opts))
+
+
+@app.get("/redmine/search/health")
+async def redmine_search_health(
+    request: Request,
+    force: int = 0,
+    session: AsyncSession = Depends(get_session),
+):
+    user = getattr(request.state, "current_user", None)
+    if not user or getattr(user, "role", "") != "admin":
+        raise HTTPException(403, "Только admin")
+    return JSONResponse(await _redmine_search_health_check(session, force=bool(force)))
 
 
 # --- Маршруты по статусу ---
@@ -1944,15 +1884,19 @@ async def matrix_bind_start(
 
     # Отправляем код в Matrix (если есть конфигурация).
     try:
-        HOMESERVER = (os.getenv("MATRIX_HOMESERVER") or "").strip()
-        ACCESS_TOKEN = (os.getenv("MATRIX_ACCESS_TOKEN") or "").strip()
-        MATRIX_USER_ID = (os.getenv("MATRIX_USER_ID") or "").strip()
-        MATRIX_DEVICE_ID = (os.getenv("MATRIX_DEVICE_ID") or "").strip()
-        if HOMESERVER and ACCESS_TOKEN and MATRIX_USER_ID:
-            mclient = AsyncClient(HOMESERVER)
-            mclient.access_token = ACCESS_TOKEN
-            mclient.user_id = MATRIX_USER_ID
-            mclient.device_id = MATRIX_DEVICE_ID
+        msec = await _get_app_secrets(
+            session,
+            ["MATRIX_HOMESERVER", "MATRIX_ACCESS_TOKEN", "MATRIX_USER_ID", "MATRIX_DEVICE_ID"],
+        )
+        homeserver = (msec.get("MATRIX_HOMESERVER") or "").strip()
+        access_token = (msec.get("MATRIX_ACCESS_TOKEN") or "").strip()
+        matrix_user_id = (msec.get("MATRIX_USER_ID") or "").strip()
+        matrix_device_id = (msec.get("MATRIX_DEVICE_ID") or "").strip()
+        if homeserver and access_token and matrix_user_id:
+            mclient = AsyncClient(homeserver)
+            mclient.access_token = access_token
+            mclient.user_id = matrix_user_id
+            mclient.device_id = matrix_device_id or "BOT"
             await room_send_with_retry(
                 mclient,
                 room_id,
