@@ -14,7 +14,6 @@ from html import escape as html_escape
 import os
 import sys
 import secrets
-import threading
 import time
 import uuid
 from pathlib import Path
@@ -35,7 +34,6 @@ from nio import AsyncClient
 from database.load_config import row_counts
 from database.models import (
     AppSecret,
-    BotOpsAudit,
     BotAppUser,
     BotSession,
     BotUser,
@@ -44,12 +42,12 @@ from database.models import (
     SupportGroup,
     VersionRoomRoute,
 )
-from database.session import get_session, get_session_factory
+from database.session import get_session
 from mail import mask_email
 from security import encrypt_secret, hash_password, load_master_key, token_hash, validate_password_policy
 
 from matrix_send import room_send_with_retry
-from ops.docker_control import DockerControlError, control_service, get_service_status
+from ops.docker_control import DockerControlError, get_service_status
 
 from admin.constants import (
     AUTH_TOKEN_SALT,
@@ -68,16 +66,10 @@ from admin.csrf import ensure_csrf as _ensure_csrf, verify_csrf as _verify_csrf
 from admin.lifespan import admin_lifespan as _admin_lifespan
 from admin.routers.auth import router as auth_router
 from admin.routers.health import router as health_router
+from admin.routers.ops import router as ops_router
+from admin.routers.secrets import router as secrets_router
 from admin.templates_env import admin_asset_version as _admin_asset_version, templates
-from admin.runtime import (
-    admin_exists_cache,
-    integration_status_cache,
-    logger,
-    process_started_at,
-    rate_limiter,
-    redmine_search_breaker,
-)
-from admin.auth_helpers import client_ip as _client_ip, generic_login_error as _generic_login_error
+from admin.runtime import logger, process_started_at, redmine_search_breaker
 from admin.middleware.auth import AuthMiddleware
 from admin.session_logic import runtime_status_from_file
 from admin.timeutil import now_utc as _now_utc
@@ -89,6 +81,8 @@ app = FastAPI(
 )
 app.include_router(health_router)
 app.include_router(auth_router)
+app.include_router(ops_router)
+app.include_router(secrets_router)
 app.middleware("http")(security_headers_middleware)
 
 _STATIC_ROOT = _ROOT / "static"
@@ -98,35 +92,6 @@ if _STATIC_ROOT.is_dir():
 
 def _token_hash(value: str) -> str:
     return hashlib.sha256((value + AUTH_TOKEN_SALT).encode("utf-8")).hexdigest()
-
-
-async def _audit_op(
-    session: AsyncSession,
-    action: str,
-    status: str,
-    actor_email: str | None = None,
-    detail: str | None = None,
-) -> None:
-    row = BotOpsAudit(
-        actor_email=(actor_email or "").strip().lower() or None,
-        action=action,
-        status=status,
-        detail=(detail or "")[:2000] or None,
-    )
-    session.add(row)
-    logger.info(
-        json.dumps(
-            {
-                "level": "AUDIT",
-                "action": action,
-                "status": status,
-                "actor": actor_email or "",
-                "detail": detail or "",
-                "ts": _now_utc().isoformat(),
-            },
-            ensure_ascii=False,
-        )
-    )
 
 
 app.add_middleware(AuthMiddleware)
@@ -162,139 +127,6 @@ async def index(
             },
         },
     )
-
-
-def _restart_in_background(actor_email: str | None) -> None:
-    def _run() -> None:
-        time.sleep(1.5)
-        detail = ""
-        status = "ok"
-        try:
-            control_service("restart")
-            detail = "restart command accepted"
-        except Exception as e:  # noqa: BLE001
-            status = "error"
-            detail = str(e)
-
-        async def _persist() -> None:
-            factory = get_session_factory()
-            async with factory() as s:
-                await _audit_op(s, "BOT_RESTART", status, actor_email=actor_email, detail=detail)
-                await s.commit()
-
-        try:
-            asyncio.run(_persist())
-        except Exception:
-            logger.exception("failed to persist restart audit")
-
-    t = threading.Thread(target=_run, daemon=True)
-    t.start()
-
-
-@app.post("/ops/bot/{action}")
-async def bot_ops_action(
-    request: Request,
-    action: str,
-    csrf_token: Annotated[str, Form()] = "",
-    session: AsyncSession = Depends(get_session),
-):
-    _verify_csrf(request, csrf_token)
-    current = getattr(request.state, "current_user", None)
-    if not current or getattr(current, "role", "") != "admin":
-        raise HTTPException(403, "Только admin")
-    ip = _client_ip(request)
-    if not rate_limiter.hit(f"ops:{ip}:{current.email}", limit=12, window_seconds=60):
-        raise HTTPException(429, "Слишком много операций, попробуйте позже")
-
-    allowed = {"start", "stop", "restart"}
-    if action not in allowed:
-        raise HTTPException(400, "Недопустимое действие")
-    actor = current.email
-    if action == "restart":
-        await _audit_op(session, "BOT_RESTART", "accepted", actor_email=actor, detail="scheduled")
-        await session.commit()
-        _restart_in_background(actor)
-        return RedirectResponse("/?ops=restart_accepted", status_code=303)
-
-    try:
-        res = control_service(action)
-        await _audit_op(
-            session,
-            f"BOT_{action.upper()}",
-            "ok",
-            actor_email=actor,
-            detail=json.dumps(res, ensure_ascii=False),
-        )
-        await session.commit()
-        return RedirectResponse(f"/?ops={action}_ok", status_code=303)
-    except DockerControlError as e:
-        await _audit_op(
-            session,
-            f"BOT_{action.upper()}",
-            "error",
-            actor_email=actor,
-            detail=str(e),
-        )
-        await session.commit()
-        return RedirectResponse(f"/?ops={action}_error", status_code=303)
-
-
-@app.get("/secrets", response_class=HTMLResponse)
-async def secrets_page(
-    request: Request,
-    session: AsyncSession = Depends(get_session),
-):
-    user = getattr(request.state, "current_user", None)
-    if not user or getattr(user, "role", "") != "admin":
-        raise HTTPException(403, "Только admin")
-    rows = await session.execute(select(AppSecret).order_by(AppSecret.name))
-    items = list(rows.scalars().all())
-    csrf_token, set_cookie = _ensure_csrf(request)
-    resp = templates.TemplateResponse(
-        request,
-        "secrets.html",
-        {"items": items, "error": None, "csrf_token": csrf_token},
-    )
-    if set_cookie:
-        resp.set_cookie(CSRF_COOKIE_NAME, csrf_token, httponly=True, secure=COOKIE_SECURE, samesite="lax")
-    return resp
-
-
-@app.post("/secrets")
-async def secrets_save(
-    request: Request,
-    name: Annotated[str, Form()],
-    value: Annotated[str, Form()],
-    csrf_token: Annotated[str, Form()] = "",
-    session: AsyncSession = Depends(get_session),
-):
-    _verify_csrf(request, csrf_token)
-    user = getattr(request.state, "current_user", None)
-    if not user or getattr(user, "role", "") != "admin":
-        raise HTTPException(403, "Только admin")
-    name = (name or "").strip()
-    value = (value or "").strip()
-    if not name or not value:
-        raise HTTPException(400, "Имя и значение обязательны")
-    key = load_master_key()
-    enc = encrypt_secret(value, key=key)
-    r = await session.execute(select(AppSecret).where(AppSecret.name == name))
-    row = r.scalar_one_or_none()
-    if row is None:
-        row = AppSecret(name=name, ciphertext=enc.ciphertext, nonce=enc.nonce, key_version=enc.key_version)
-        session.add(row)
-    else:
-        row.ciphertext = enc.ciphertext
-        row.nonce = enc.nonce
-        row.key_version = enc.key_version
-    integration_status_cache.invalidate()
-    logger.info(
-        "secret_updated name=%s actor=%s key_version=%s",
-        name,
-        mask_email(user.email),
-        enc.key_version,
-    )
-    return RedirectResponse("/secrets", status_code=303)
 
 
 @app.get("/app-users", response_class=HTMLResponse)

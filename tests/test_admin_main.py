@@ -157,7 +157,9 @@ def test_ops_restart_accepts_and_redirects(client: TestClient, monkeypatch):
         pytest.skip("Тест требует Postgres (DATABASE_URL)")
     _setup_and_login_admin(client, email="ops_admin@example.com")
 
-    monkeypatch.setattr(admin_main, "_restart_in_background", lambda actor: None)
+    from admin.routers import ops as admin_ops
+
+    monkeypatch.setattr(admin_ops, "restart_in_background", lambda actor: None)
     page = client.get("/")
     token = page.cookies.get("admin_csrf")
     r = client.post("/ops/bot/restart", data={"csrf_token": token}, follow_redirects=False)
