@@ -23,11 +23,13 @@ services:
       - |
         set -e
         apk add --no-cache openssl >/dev/null
-        install -d -m 700 /out
+        mkdir -p /out
         if [ ! -s /out/postgres_password ]; then
           openssl rand -hex 24 > /out/postgres_password
-          chmod 444 /out/postgres_password
         fi
+        # 700 на каталоге ломает чтение для user bot (uid 1000) в admin/bot.
+        chmod 755 /out
+        chmod 444 /out/postgres_password
     volumes:
       - postgres_password_vol:/out
 

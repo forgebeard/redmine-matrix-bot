@@ -212,7 +212,7 @@ python3 bot.py
 
 | Сервис | Назначение |
 |--------|------------|
-| **postgres-password-init** | Одноразовый контейнер: случайный пароль Postgres в томе `postgres_password_vol` (в git паролей нет). |
+| **postgres-password-init** | Одноразовый контейнер: случайный пароль Postgres в томе `postgres_password_vol` (в git паролей нет). Каталог в томе — `0755`, файл — `0444`, чтобы процессы под пользователем `bot` (uid 1000) могли читать пароль. |
 | **bot** | Образ `Dockerfile`, том `./data`; DSN из `DATABASE_PASSWORD_FILE` + `POSTGRES_*`. Healthcheck: `python -c "import bot"`. |
 | **postgres** | PostgreSQL 16, том `postgres_data`; пароль из файла `POSTGRES_PASSWORD_FILE`. |
 | **docker-socket-proxy** | Прокси к Docker API для runtime-control из admin. |
@@ -248,6 +248,10 @@ docker compose down
 ```
 
 Данные **Postgres** — в томе `postgres_data`; файл с паролем суперпользователя — в томе `postgres_password_vol` (не коммитится). State больше не пишется в JSON.
+
+**Если admin/bot падают с `Permission denied` на `/run/db_password/postgres_password`:** выполните `docker compose up -d postgres-password-init` (подправит права на каталог в томе) и пересоздайте контейнеры `admin`/`bot` (`docker compose up -d --force-recreate admin bot`).
+
+**Если после правок тома пароля видите `password authentication failed for user "bot"` при живом `postgres_data`:** пароль в файле и в уже инициализированном кластере разошлись. В dev проще снести том `postgres_data` и поднять заново; либо синхронизируйте пароль роли с содержимым файла (из контейнера `postgres`: прочитать `/run/db_password/postgres_password` и выполнить `ALTER USER … PASSWORD`).
 
 ### Админка и конфиг в БД
 
