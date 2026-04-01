@@ -47,14 +47,14 @@ _COMMON_WEAK_PASSWORDS = {
 }
 
 
-def validate_password_policy(password: str, email: str = "") -> tuple[bool, str | None]:
+def validate_password_policy(password: str, login: str = "") -> tuple[bool, str | None]:
     """Returns (ok, reason)."""
     if len(password or "") < 12:
         return False, "Пароль должен содержать минимум 12 символов"
     if password.lower() in _COMMON_WEAK_PASSWORDS:
         return False, "Пароль слишком простой"
-    if email and email.lower() in password.lower():
-        return False, "Пароль не должен содержать email"
+    if login and login.lower() in password.lower():
+        return False, "Пароль не должен содержать логин"
     if not re.search(r"[A-Za-zА-Яа-я]", password):
         return False, "Пароль должен содержать буквы"
     if not re.search(r"\d", password):

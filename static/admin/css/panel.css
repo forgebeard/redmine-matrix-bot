@@ -224,7 +224,7 @@ body {
 .user-trigger:hover { background: var(--glass); border-color: var(--border); }
 .user-meta { text-align: right; }
 .user-meta .name { font-size: 0.95rem; font-weight: 600; }
-.user-meta .email { font-size: 0.78rem; color: var(--muted); max-width: 14rem; overflow: hidden; text-overflow: ellipsis; }
+.user-meta .login { font-size: 0.78rem; color: var(--muted); max-width: 14rem; overflow: hidden; text-overflow: ellipsis; }
 .avatar {
   width: 2.35rem;
   height: 2.35rem;

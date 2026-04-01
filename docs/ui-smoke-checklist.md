@@ -2,7 +2,7 @@
 
 Пройти вручную перед merge (если e2e не запускались):
 
-1. `GET /health/live`, `GET /health/ready`, `GET /health/smtp`.
+1. `GET /health/live`, `GET /health/ready`.
 2. Первый вход:
    - при отсутствии admin доступен `/setup`,
    - после создания admin `/setup` больше не создаёт нового admin.
@@ -47,5 +47,5 @@
 18. **Статика и CSP:** `GET /static/admin/css/panel.css` отдаётся; при включённом `ADMIN_ENABLE_CSP` страницы получают заголовок `Content-Security-Policy` (проверить в DevTools → Network).
 19. **Версия CSS:** в HTML ссылки вида `/static/admin/css/panel.css?v=…` и `auth.css?v=…` (значение из `ADMIN_ASSET_VERSION`, по умолчанию `1`); после смены стилей в деплое увеличить версию в `.env`, чтобы браузер подтянул новый файл без принудительного обновления.
 20. **Баннер интеграций** (если интеграции не настроены): полная полоса сворачивается кнопкой в компактную ссылку «Интеграции»; после перезагрузки состояние сохраняется (`localStorage`); кнопка снова разворачивает текст.
-21. **Автотесты E2E (опционально):** при `DATABASE_URL` и `playwright install chromium` — `pytest tests/e2e/`; при уже созданном админе задать `E2E_ADMIN_EMAIL` / `E2E_ADMIN_PASSWORD` или прогонять на пустой БД после миграций.
+21. **Автотесты E2E (опционально):** при `DATABASE_URL` и `playwright install chromium` — `pytest tests/e2e/`; при уже созданном админе задать `E2E_ADMIN_LOGIN` / `E2E_ADMIN_PASSWORD` или прогонять на пустой БД после миграций.
 22. **Группы и пользователи:** раздел `Группы` доступен и редактирует `name/room/timezone/is_active`; в форме пользователя выбирается группа из списка, а в списке работает фильтр `Все группы` + `UNASSIGNED`.

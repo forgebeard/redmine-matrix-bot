@@ -12,7 +12,6 @@ ENV_EXAMPLE = ROOT / ".env.example"
 TARGET_FILES = [
     ROOT / "admin_main.py",
     ROOT / "src" / "security.py",
-    ROOT / "src" / "mail.py",
 ]
 
 ENV_RE = re.compile(r'os\.getenv\(\s*"([A-Z0-9_]+)"')

@@ -166,14 +166,16 @@ cd src && python3 -c "from config import validate_required_env; ok, m = validate
 
 ### 5. Запуск тестов
 
-Зависимости для pytest: `pip install -r requirements-test.txt`.
+Зависимости для pytest: `pip install -r requirements.txt -r requirements-test.txt` (в `requirements-test.txt` есть **httpx** для `TestClient` админки).
+
+Если задан **`DATABASE_URL`** на Postgres, он должен совпадать с реальным сервером (пароль/пользователь из `.env` или из `docker compose`). Пример из CI (`postgresql://bot:postgres@localhost:5432/redmine_matrix`) подходит только при таком же контейнере или настройке `pg_hba`.
 
 ```bash
 # Юнит- и API-тесты (без браузера)
 python -m pytest tests/ -v --tb=short --ignore=tests/e2e
 ```
 
-**E2E (Playwright)** — `tests/e2e/`: поднимают отдельный `uvicorn` и Chromium. Нужны `DATABASE_URL` на Postgres, после установки браузера: `python -m playwright install chromium`. Полный сценарий входа выполняется либо при пустой БД (одноразовая регистрация через `/setup` в фикстуре), либо при заданных **`E2E_ADMIN_EMAIL`** и **`E2E_ADMIN_PASSWORD`** в окружении.
+**E2E (Playwright)** — `tests/e2e/`: поднимают отдельный `uvicorn` и Chromium. Нужны `DATABASE_URL` на Postgres, после установки браузера: `python -m playwright install chromium`. Полный сценарий входа выполняется либо при пустой БД (одноразовая регистрация через `/setup` в фикстуре), либо при заданных **`E2E_ADMIN_LOGIN`** и **`E2E_ADMIN_PASSWORD`** в окружении.
 
 ```bash
 python -m pytest tests/e2e/ -v --tb=short
@@ -240,8 +242,10 @@ docker compose down
 
 ### Админка и конфиг в БД
 
+**Пошаговое руководство для администраторов** (развёртывание, первый вход, пароли, порты, локальный `DATABASE_URL`): [docs/ADMINISTRATOR_GUIDE.md](docs/ADMINISTRATOR_GUIDE.md).
+
 1. После `docker compose up` откройте `http://<хост>:8080/setup` и создайте первого admin (только если admin ещё нет в БД).
-2. Вход в админку: `http://<хост>:8080/login` по `email + password`.
+2. Вход в админку: `http://<хост>:8080/login` по логину и паролю.
 3. Восстановление пароля: `http://<хост>:8080/forgot-password` → одноразовый reset token.
 4. Заполните пользователей, маршруты и секреты в админке; затем перезапустите сервис **`bot`** (бот читает конфиг при старте).
 5. Для дедупликации на нескольких инстансах используется lease по пользователю (`bot_user_leases`) и state в `bot_issue_state`.
@@ -302,6 +306,7 @@ REDMINE_API_KEY=your_redmine_api_key
 
 | Переменная | Назначение |
 |------------|------------|
+| `ADMIN_LOGINS` | Список разрешённых логинов панели (через запятую); пусто = без ограничения |
 | `AUTH_TOKEN_SALT` | Соль для hash reset-токенов |
 | `SESSION_TTL_SECONDS` | Время жизни admin-сессии |
 | `RESET_TOKEN_TTL_SECONDS` | TTL токена сброса пароля |
@@ -310,31 +315,17 @@ REDMINE_API_KEY=your_redmine_api_key
 | `APP_MASTER_KEY_FILE` | Путь к master key (32 байта) |
 | `SHOW_DEV_TOKENS` | Показ dev reset-токена в UI (только dev/test) |
 
-### SMTP reset
-
-| Переменная | Назначение |
-|------------|------------|
-| `SMTP_HOST` | SMTP сервер |
-| `SMTP_PORT` | SMTP порт |
-| `SMTP_USERNAME` | SMTP логин |
-| `SMTP_PASSWORD` | SMTP пароль |
-| `SMTP_SENDER` | Email отправителя |
-| `SMTP_USE_TLS` / `SMTP_USE_STARTTLS` | Режим транспортной защиты |
-| `SMTP_MOCK` | dev/test режим без реальной отправки (в production должен быть `0`) |
-| `SMTP_HEALTH_TTL_SECONDS` | TTL кэша проверки SMTP |
-
 ### Health endpoints
 
 - `GET /health/live` — процесс поднят.
 - `GET /health/ready` — доступны БД и master key.
-- `GET /health/smtp` — состояние SMTP (`ok/degraded`), не блокирует запуск приложения.
 
 ### Recovery
 
 Аварийный сброс пароля администратора:
 
 ```bash
-python scripts/reset_admin_password.py --email admin@example.com --password 'NewStrongPassword123'
+python scripts/reset_admin_password.py --login admin --password 'NewStrongPassword123'
 ```
 
 Полный регламент отката: `docs/rollback-runbook.md`.

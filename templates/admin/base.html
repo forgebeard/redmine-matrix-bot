@@ -63,9 +63,9 @@
         <div class="user-trigger" id="user-trigger" role="button" tabindex="0" aria-haspopup="true" aria-expanded="false" aria-controls="user-dropdown">
           <div class="user-meta">
             <div class="name">{% if _current_user.role == 'admin' %}Администратор{% else %}Пользователь{% endif %}</div>
-            <div class="email" title="{{ _current_user.email }}">{{ _current_user.email }}</div>
+            <div class="login" title="{{ _current_user.login }}">{{ _current_user.login }}</div>
           </div>
-          <div class="avatar" aria-hidden="true">{{ (_current_user.email[:1] or '?')|upper }}</div>
+          <div class="avatar" aria-hidden="true">{{ (_current_user.login[:1] or '?')|upper }}</div>
         </div>
         <div class="dropdown" id="user-dropdown" role="menu">
           <a href="/me/settings" role="menuitem"><i class="fa-solid fa-sliders"></i> Мои настройки</a>

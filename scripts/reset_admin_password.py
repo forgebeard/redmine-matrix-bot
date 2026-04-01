@@ -20,20 +20,24 @@ from security import hash_password, validate_password_policy
 
 async def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--email", required=True, help="Admin email")
+    parser.add_argument("--login", required=True, help="Admin login")
     parser.add_argument("--password", required=True, help="New password")
     args = parser.parse_args()
 
-    email = args.email.strip().lower()
+    login = (args.login or "").strip().lower()
+    if not login:
+        print("Specify --login.", file=sys.stderr)
+        return 5
+
     password = args.password
-    ok, reason = validate_password_policy(password, email=email)
+    ok, reason = validate_password_policy(password, login=login)
     if not ok:
         print(f"Password policy failed: {reason}", file=sys.stderr)
         return 2
 
     factory = get_session_factory()
     async with factory() as session:
-        r = await session.execute(select(BotAppUser).where(BotAppUser.email == email))
+        r = await session.execute(select(BotAppUser).where(BotAppUser.login == login))
         user = r.scalar_one_or_none()
         if not user:
             print("User not found", file=sys.stderr)

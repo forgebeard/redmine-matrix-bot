@@ -2,7 +2,7 @@
 Веб-админка: пользователи бота и маршруты Matrix (Postgres).
 
 Запуск: uvicorn admin_main:app --host 0.0.0.0 --port 8080
-Требуется DATABASE_URL (доступ к UI — через email/password).
+Требуется DATABASE_URL (доступ к UI — через логин и пароль).
 """
 
 from __future__ import annotations
@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import re
 from html import escape as html_escape
 import logging
 import os
@@ -51,7 +52,7 @@ from database.models import (
     VersionRoomRoute,
 )
 from database.session import get_session, get_session_factory
-from mail import check_smtp_health, mask_email, send_reset_email
+from mail import mask_identifier
 from security import (
     SecurityError,
     encrypt_secret,
@@ -166,13 +167,33 @@ NOTIFY_TYPES = [
 ]
 NOTIFY_TYPE_KEYS = [k for k, _ in NOTIFY_TYPES]
 
-_ADMIN_EMAILS = {
-    e.strip().lower()
-    for e in (os.getenv("ADMIN_EMAILS", "") or "").split(",")
-    if e.strip()
-}
-
 ADMIN_BOOTSTRAP_FIRST_ADMIN = (os.getenv("ADMIN_BOOTSTRAP_FIRST_ADMIN", "0").strip().lower() in ("1", "true", "yes", "on"))
+
+_LOGIN_RE = re.compile(r"^[a-zA-Z0-9@._+-]{3,255}$")
+
+
+def _admin_allowlist() -> frozenset[str]:
+    raw = (os.getenv("ADMIN_LOGINS") or "").strip()
+    return frozenset(x.strip().lower() for x in raw.split(",") if x.strip())
+
+
+def _normalize_login(raw: str) -> str:
+    return (raw or "").strip().lower()
+
+
+def _login_format_ok(login: str) -> tuple[bool, str | None]:
+    if not login:
+        return False, "Введите логин"
+    if not _LOGIN_RE.fullmatch(login):
+        return False, "Логин: 3–255 символов, латиница, цифры и символы . _ + - @"
+    return True, None
+
+
+def _login_allowed(login: str) -> bool:
+    allow = _admin_allowlist()
+    if not allow:
+        return True
+    return login in allow
 
 
 def _now_utc() -> datetime:
@@ -184,7 +205,7 @@ def _token_hash(value: str) -> str:
 
 
 def _generic_login_error() -> str:
-    return "Неверный email или пароль"
+    return "Неверный логин или пароль"
 
 
 def _client_ip(request: Request) -> str:
@@ -215,11 +236,11 @@ async def _audit_op(
     session: AsyncSession,
     action: str,
     status: str,
-    actor_email: str | None = None,
+    actor_login: str | None = None,
     detail: str | None = None,
 ) -> None:
     row = BotOpsAudit(
-        actor_email=(actor_email or "").strip().lower() or None,
+        actor_login=(actor_login or "").strip().lower() or None,
         action=action,
         status=status,
         detail=(detail or "")[:2000] or None,
@@ -231,7 +252,7 @@ async def _audit_op(
                 "level": "AUDIT",
                 "action": action,
                 "status": status,
-                "actor": actor_email or "",
+                "actor": actor_login or "",
                 "detail": detail or "",
                 "ts": _now_utc().isoformat(),
             },
@@ -378,7 +399,7 @@ async def _integration_status(session: AsyncSession, use_cache: bool = True) -> 
 
 class AuthMiddleware(BaseHTTPMiddleware):
     """
-    Auth для админки через DB-сессии после login по email/password.
+    Auth для админки через DB-сессии после входа по логину и паролю.
     """
 
     async def dispatch(self, request: Request, call_next):
@@ -392,7 +413,6 @@ class AuthMiddleware(BaseHTTPMiddleware):
             "/health",
             "/health/live",
             "/health/ready",
-            "/health/smtp",
             SETUP_PATH,
         ) or p.startswith("/docs") or p in (
             "/openapi.json",
@@ -509,24 +529,6 @@ async def health_ready(session: AsyncSession = Depends(get_session)):
     return {"status": "ready"}
 
 
-@app.get("/health/smtp")
-async def health_smtp():
-    health = check_smtp_health()
-    code = 200 if health.ok else 503
-    return HTMLResponse(
-        content=json.dumps(
-            {
-                "status": "ok" if health.ok else "degraded",
-                "detail": health.detail,
-                "checked_at": health.checked_at,
-            },
-            ensure_ascii=False,
-        ),
-        status_code=code,
-        media_type="application/json",
-    )
-
-
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
     csrf_token, set_cookie = _ensure_csrf(request)
@@ -578,21 +580,40 @@ async def setup_page(request: Request, session: AsyncSession = Depends(get_sessi
 @app.post(SETUP_PATH)
 async def setup_post(
     request: Request,
-    email: Annotated[str, Form()],
+    login: Annotated[str, Form()],
     password: Annotated[str, Form()],
+    password_confirm: Annotated[str, Form()] = "",
     csrf_token: Annotated[str, Form()] = "",
     session: AsyncSession = Depends(get_session),
 ):
     _verify_csrf(request, csrf_token)
-    email = (email or "").strip().lower()
-    if not email or "@" not in email:
+    login_n = _normalize_login(login)
+    fmt_ok, fmt_err = _login_format_ok(login_n)
+    if not fmt_ok:
         return templates.TemplateResponse(
             request,
             "setup.html",
-            {"error": "Введите корректный email", "csrf_token": csrf_token},
+            {"error": fmt_err, "csrf_token": csrf_token},
             status_code=400,
         )
-    ok, reason = validate_password_policy(password, email=email)
+    if not _login_allowed(login_n):
+        return templates.TemplateResponse(
+            request,
+            "setup.html",
+            {
+                "error": "Этот логин не разрешён (проверьте ADMIN_LOGINS в окружении).",
+                "csrf_token": csrf_token,
+            },
+            status_code=403,
+        )
+    if (password or "") != (password_confirm or ""):
+        return templates.TemplateResponse(
+            request,
+            "setup.html",
+            {"error": "Пароли не совпадают", "csrf_token": csrf_token},
+            status_code=400,
+        )
+    ok, reason = validate_password_policy(password, login=login_n)
     if not ok:
         return templates.TemplateResponse(
             request,
@@ -616,7 +637,7 @@ async def setup_post(
         )
     user = BotAppUser(
         id=uuid.uuid4(),
-        email=email,
+        login=login_n,
         role="admin",
         verified_at=_now_utc(),
         password_hash=hash_password(password),
@@ -630,7 +651,7 @@ async def setup_post(
 @app.post("/login")
 async def login_post(
     request: Request,
-    email: Annotated[str, Form()],
+    login: Annotated[str, Form()],
     password: Annotated[str, Form()],
     csrf_token: Annotated[str, Form()] = "",
     session: AsyncSession = Depends(get_session),
@@ -640,15 +661,23 @@ async def login_post(
     if not _rate_limiter.hit(f"login:ip:{ip}", limit=5, window_seconds=60):
         raise HTTPException(429, "Слишком много попыток, попробуйте позже")
 
-    email = (email or "").strip().lower()
-    if not email or not password:
+    login_n = _normalize_login(login)
+    if not login_n or not password:
         return templates.TemplateResponse(
             request,
             "login.html",
             {"error": _generic_login_error(), "csrf_token": csrf_token},
             status_code=401,
         )
-    r = await session.execute(select(BotAppUser).where(BotAppUser.email == email))
+    fmt_ok, _ = _login_format_ok(login_n)
+    if not fmt_ok or not _login_allowed(login_n):
+        return templates.TemplateResponse(
+            request,
+            "login.html",
+            {"error": _generic_login_error(), "csrf_token": csrf_token},
+            status_code=401,
+        )
+    r = await session.execute(select(BotAppUser).where(BotAppUser.login == login_n))
     user = r.scalar_one_or_none()
     if not user or not user.password_hash or not verify_password(user.password_hash, password):
         return templates.TemplateResponse(
@@ -730,7 +759,7 @@ async def onboarding_save(
             row.ciphertext = enc.ciphertext
             row.nonce = enc.nonce
             row.key_version = enc.key_version
-        logger.info("secret_updated name=%s actor=%s key_version=%s", secret_name, mask_email(user.email), enc.key_version)
+        logger.info("secret_updated name=%s actor=%s key_version=%s", secret_name, mask_identifier(user.login), enc.key_version)
     # onboarding is complete once values were submitted; remove skip marker.
     await session.execute(delete(AppSecret).where(AppSecret.name == ONBOARDING_SKIPPED_SECRET))
     _integration_status_cache.invalidate()
@@ -773,24 +802,28 @@ async def forgot_password_page(request: Request):
 @app.post("/forgot-password", response_class=HTMLResponse)
 async def forgot_password_post(
     request: Request,
-    email: Annotated[str, Form()],
+    login: Annotated[str, Form()],
     csrf_token: Annotated[str, Form()] = "",
     session: AsyncSession = Depends(get_session),
 ):
     _verify_csrf(request, csrf_token)
-    email = (email or "").strip().lower()
+    login_n = _normalize_login(login)
     ip = _client_ip(request)
     if not _rate_limiter.hit(f"forgot:ip:{ip}", limit=5, window_seconds=60):
         raise HTTPException(429, "Слишком много попыток, попробуйте позже")
-    if not _rate_limiter.hit(f"forgot:email:{email}", limit=3, window_seconds=3600):
+    if not _rate_limiter.hit(f"forgot:login:{login_n}", limit=3, window_seconds=3600):
         return templates.TemplateResponse(
             request,
             "forgot_password.html",
             {"error": "Слишком много запросов сброса, попробуйте позже", "ok": None, "csrf_token": csrf_token},
             status_code=429,
         )
-    r = await session.execute(select(BotAppUser).where(BotAppUser.email == email))
+    r = await session.execute(select(BotAppUser).where(BotAppUser.login == login_n))
     user = r.scalar_one_or_none()
+    _forgot_ok_message = (
+        "Если логин существует, сброс пароля — через администратора "
+        "или одноразовый токен при SHOW_DEV_TOKENS=1 (только для разработки)."
+    )
     # Response must stay generic and not leak if user exists.
     if user:
         token = make_reset_token()
@@ -798,19 +831,16 @@ async def forgot_password_post(
             id=uuid.uuid4(),
             user_id=user.id,
             token_hash=token_hash(token, AUTH_TOKEN_SALT),
-            requested_email=email,
+            requested_login=login_n,
             expires_at=_now_utc() + timedelta(seconds=RESET_TOKEN_TTL_SECONDS),
             used_at=None,
         )
         session.add(row)
         await session.flush()
-        reset_url = f"{request.base_url}reset-password?token={token}"
-        sent, send_detail = send_reset_email(email, reset_url)
         logger.info(
-            "password_reset_requested email=%s sent=%s detail=%s",
-            mask_email(email),
-            sent,
-            send_detail,
+            "password_reset_requested login=%s dev_token=%s",
+            mask_identifier(login_n),
+            bool(SHOW_DEV_TOKENS),
         )
         # Dev-mode helper: show token in UI only if explicitly enabled.
         dev_token = token if SHOW_DEV_TOKENS else None
@@ -819,7 +849,7 @@ async def forgot_password_post(
             "forgot_password.html",
             {
                 "error": None,
-                "ok": "Если email существует, ссылка на сброс отправлена.",
+                "ok": _forgot_ok_message,
                 "dev_token": dev_token,
                 "csrf_token": csrf_token,
             },
@@ -827,7 +857,7 @@ async def forgot_password_post(
     return templates.TemplateResponse(
         request,
         "forgot_password.html",
-        {"error": None, "ok": "Если email существует, ссылка на сброс отправлена.", "csrf_token": csrf_token},
+        {"error": None, "ok": _forgot_ok_message, "csrf_token": csrf_token},
     )
 
 
@@ -881,7 +911,7 @@ async def reset_password_post(
     user = u.scalar_one_or_none()
     if not user:
         return RedirectResponse("/login", status_code=303)
-    ok, reason = validate_password_policy(password, email=user.email)
+    ok, reason = validate_password_policy(password, login=user.login)
     if not ok:
         return templates.TemplateResponse(
             request,
@@ -945,7 +975,7 @@ async def index(
     )
 
 
-def _restart_in_background(actor_email: str | None) -> None:
+def _restart_in_background(actor_login: str | None) -> None:
     def _run() -> None:
         time.sleep(1.5)
         detail = ""
@@ -960,7 +990,7 @@ def _restart_in_background(actor_email: str | None) -> None:
         async def _persist() -> None:
             factory = get_session_factory()
             async with factory() as s:
-                await _audit_op(s, "BOT_RESTART", status, actor_email=actor_email, detail=detail)
+                await _audit_op(s, "BOT_RESTART", status, actor_login=actor_login, detail=detail)
                 await s.commit()
 
         try:
@@ -984,15 +1014,15 @@ async def bot_ops_action(
     if not current or getattr(current, "role", "") != "admin":
         raise HTTPException(403, "Только admin")
     ip = _client_ip(request)
-    if not _rate_limiter.hit(f"ops:{ip}:{current.email}", limit=12, window_seconds=60):
+    if not _rate_limiter.hit(f"ops:{ip}:{current.login}", limit=12, window_seconds=60):
         raise HTTPException(429, "Слишком много операций, попробуйте позже")
 
     allowed = {"start", "stop", "restart"}
     if action not in allowed:
         raise HTTPException(400, "Недопустимое действие")
-    actor = current.email
+    actor = current.login
     if action == "restart":
-        await _audit_op(session, "BOT_RESTART", "accepted", actor_email=actor, detail="scheduled")
+        await _audit_op(session, "BOT_RESTART", "accepted", actor_login=actor, detail="scheduled")
         await session.commit()
         _restart_in_background(actor)
         return RedirectResponse("/?ops=restart_accepted", status_code=303)
@@ -1003,7 +1033,7 @@ async def bot_ops_action(
             session,
             f"BOT_{action.upper()}",
             "ok",
-            actor_email=actor,
+            actor_login=actor,
             detail=json.dumps(res, ensure_ascii=False),
         )
         await session.commit()
@@ -1013,7 +1043,7 @@ async def bot_ops_action(
             session,
             f"BOT_{action.upper()}",
             "error",
-            actor_email=actor,
+            actor_login=actor,
             detail=str(e),
         )
         await session.commit()
@@ -1072,7 +1102,7 @@ async def secrets_save(
     logger.info(
         "secret_updated name=%s actor=%s key_version=%s",
         name,
-        mask_email(user.email),
+        mask_identifier(user.login),
         enc.key_version,
     )
     return RedirectResponse("/secrets", status_code=303)
@@ -1086,7 +1116,7 @@ async def app_users_page(
     user = getattr(request.state, "current_user", None)
     if not user or getattr(user, "role", "") != "admin":
         raise HTTPException(403, "Только admin")
-    rows = await session.execute(select(BotAppUser).order_by(BotAppUser.email))
+    rows = await session.execute(select(BotAppUser).order_by(BotAppUser.login))
     users = list(rows.scalars().all())
     csrf_token, set_cookie = _ensure_csrf(request)
     resp = templates.TemplateResponse(
@@ -1116,13 +1146,17 @@ async def app_user_reset_password_admin(
     target = q.scalar_one_or_none()
     if not target:
         raise HTTPException(404, "Пользователь не найден")
-    ok, reason = validate_password_policy(new_password, email=target.email)
+    ok, reason = validate_password_policy(new_password, login=target.login)
     if not ok:
         raise HTTPException(400, reason)
     target.password_hash = hash_password(new_password)
     target.session_version = (target.session_version or 1) + 1
     await session.execute(delete(BotSession).where(BotSession.user_id == target.id))
-    logger.info("admin_password_reset target=%s actor=%s", mask_email(target.email), mask_email(current.email))
+    logger.info(
+        "admin_password_reset target=%s actor=%s",
+        mask_identifier(target.login),
+        mask_identifier(current.login),
+    )
     return RedirectResponse("/app-users", status_code=303)
 
 

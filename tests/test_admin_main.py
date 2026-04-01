@@ -8,7 +8,8 @@ import pytest
 
 # Для password auth и encrypted-secrets на старте нужен master key.
 os.environ.setdefault("APP_MASTER_KEY", "0123456789abcdef0123456789abcdef")
-os.environ.setdefault("SMTP_MOCK", "1")
+# Тесты /setup и /login не должны зависеть от локального ADMIN_LOGINS в окружении разработчика.
+os.environ.pop("ADMIN_LOGINS", None)
 
 import admin_main  # noqa: E402
 
@@ -26,18 +27,11 @@ def test_health_ok(client: TestClient):
     assert r.headers.get("x-frame-options") == "DENY"
 
 
-def test_health_smtp_ok_in_mock_mode(client: TestClient):
-    r = client.get("/health/smtp")
-    assert r.status_code == 200
-    payload = r.json()
-    assert payload["status"] == "ok"
-
-
 def test_login_page_ok(client: TestClient):
     r = client.get("/login")
     assert r.status_code == 200
     assert "Вход в панель" in r.text
-    assert "Email" in r.text
+    assert "Логин" in r.text
     assert "Пароль" in r.text
     assert "Забыли пароль?" in r.text
     assert "/static/admin/css/auth.css?v=" in r.text
@@ -96,8 +90,9 @@ def test_a_setup_creates_first_admin(client: TestClient):
     r = client.post(
         "/setup",
         data={
-            "email": "test_admin@example.com",
+            "login": "test_admin@example.com",
             "password": "StrongPassword123",
+            "password_confirm": "StrongPassword123",
             "csrf_token": token,
         },
         follow_redirects=False,
@@ -113,21 +108,26 @@ def test_users_redirects_to_login_without_auth(client: TestClient):
     assert loc.endswith("/login") or loc.endswith("/setup"), loc
 
 
-def _setup_and_login_admin(client: TestClient, email: str = "test_admin@example.com", password: str = "StrongPassword123") -> None:
+def _setup_and_login_admin(client: TestClient, login: str = "test_admin@example.com", password: str = "StrongPassword123") -> None:
     client.get("/setup", follow_redirects=True)
     token = client.cookies.get("admin_csrf")
     created = client.post(
         "/setup",
-        data={"email": email, "password": password, "csrf_token": token},
+        data={
+            "login": login,
+            "password": password,
+            "password_confirm": password,
+            "csrf_token": token,
+        },
         follow_redirects=False,
     )
     # На одной БД несколько тестов: первый создаёт админа, остальные получают 409.
     assert created.status_code in (302, 303, 409), created.status_code
-    login = client.get("/login")
+    client.get("/login")
     ltoken = client.cookies.get("admin_csrf")
     client.post(
         "/login",
-        data={"email": email, "password": password, "csrf_token": ltoken},
+        data={"login": login, "password": password, "csrf_token": ltoken},
         follow_redirects=True,
     )
 

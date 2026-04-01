@@ -7,7 +7,7 @@
 <table>
   <thead>
     <tr>
-      <th>Email</th>
+      <th>Логин</th>
       <th>Роль</th>
       <th>Верификация</th>
       <th>Сброс пароля админом</th>
@@ -16,7 +16,7 @@
   <tbody>
     {% for u in users %}
     <tr>
-      <td>{{ u.email }}</td>
+      <td>{{ u.login }}</td>
       <td>{{ u.role }}</td>
       <td>{{ u.verified_at or "—" }}</td>
       <td class="cell-form">

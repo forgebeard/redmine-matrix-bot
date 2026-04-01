@@ -89,7 +89,9 @@ class BotOpsAudit(Base):
     __tablename__ = "bot_ops_audit"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    actor_email: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    actor_login: Mapped[str | None] = mapped_column(
+        "actor_email", String(255), nullable=True, index=True
+    )
     action: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     detail: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -138,7 +140,7 @@ class BotIssueState(Base):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Auth по email (magic-link) + RBAC
+# Auth панели: логин + пароль (+ RBAC)
 # ═══════════════════════════════════════════════════════════════════════════
 
 
@@ -146,7 +148,7 @@ class BotAppUser(Base):
     __tablename__ = "bot_app_users"
 
     id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
-    email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
+    login: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
     role: Mapped[str] = mapped_column(String(16), nullable=False, default="user")
     verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -163,7 +165,7 @@ class BotMagicToken(Base):
     __tablename__ = "bot_magic_tokens"
 
     id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
-    email: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    login: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     token_hash: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -192,7 +194,7 @@ class PasswordResetToken(Base):
     id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
     user_id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False, index=True)
     token_hash: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
-    requested_email: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    requested_login: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
