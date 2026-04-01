@@ -28,10 +28,8 @@ def upgrade() -> None:
     op.drop_index(op.f("ix_bot_app_users_email"), table_name="bot_app_users")
     op.alter_column("bot_app_users", "email", existing_type=sa.String(length=255), nullable=True)
 
-    op.drop_constraint("uq_password_reset_tokens_token_hash", "password_reset_tokens", type_="unique")
-    op.drop_index(op.f("ix_password_reset_tokens_user_id"), table_name="password_reset_tokens")
-    op.drop_index(op.f("ix_password_reset_tokens_requested_email"), table_name="password_reset_tokens")
-    op.drop_table("password_reset_tokens")
+    # Таблица могла быть удалена внешней/промежуточной миграцией — не падаем на DROP.
+    op.execute(sa.text("DROP TABLE IF EXISTS password_reset_tokens CASCADE"))
 
 
 def downgrade() -> None:
