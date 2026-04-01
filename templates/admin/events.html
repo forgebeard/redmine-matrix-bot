@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% from "macros.html" import page_head %}
+{% block title %}События{% endblock %}
+{% block content %}
+{{ page_head("События") }}
+<div class="card content-stack">
+  <div
+    id="events-log"
+    class="events-log-wrap"
+    hx-get="/events/tail"
+    hx-trigger="load, every 3s"
+    hx-swap="innerHTML"
+  >
+    <pre class="log-tail muted">Загрузка…</pre>
+  </div>
+</div>
+{% endblock %}

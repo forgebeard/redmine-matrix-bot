@@ -204,7 +204,7 @@ python3 bot.py
 | **bot** | Образ из `Dockerfile` (корневой `bot.py` + `src/`), том `./data` → `/app/data`, `.env` только для чтения; healthcheck: `python -c "import bot"` |
 | **postgres** | PostgreSQL 16, том `postgres_data`; `DATABASE_URL` в **bot** и **admin** |
 | **docker-socket-proxy** | Ограниченный прокси к Docker API для runtime-control из admin (без прямого монтирования raw socket в admin) |
-| **admin** | Веб-интерфейс (`admin_main.py`, FastAPI + Jinja2 + HTMX): шаблоны в `templates/admin/`, стили в `static/admin/css/` (раздача `/static/...`); ссылки на CSS с `?v=…` из **`ADMIN_ASSET_VERSION`** (по умолчанию `1`) для сброса кэша после обновления стилей; runtime-control (`start/stop/restart` сервиса `bot`) через `DOCKER_HOST` + `DOCKER_TARGET_SERVICE`; опционально **CSP** через `ADMIN_ENABLE_CSP` / `ADMIN_CSP_POLICY` в `.env`. Порт: **`ADMIN_PORT`** (по умолчанию 8080); при старте `alembic upgrade head` |
+| **admin** | Панель (`admin_main.py`, FastAPI + Jinja2 + HTMX): **дашборд**, **группы** (в т.ч. маршруты по статусу Redmine в комнату группы), **пользователи**, **настройки** (`/onboarding`), **события** (хвост лога, см. **`ADMIN_EVENTS_LOG_PATH`** / `data/bot.log` в документации); `/routes/version` с дашборда; runtime-control бота; **CSP** (`ADMIN_ENABLE_CSP` / `ADMIN_CSP_POLICY`); **`ADMIN_PORT`** (8080); при старте `alembic upgrade head` |
 
 ### Подготовка `.env`
 
@@ -247,7 +247,7 @@ docker compose down
 1. После `docker compose up` откройте `http://<хост>:8080/setup` и создайте первого admin (только если admin ещё нет в БД).
 2. Вход в админку: `http://<хост>:8080/login` по логину и паролю.
 3. Восстановление пароля: `http://<хост>:8080/forgot-password` → одноразовый reset token.
-4. Заполните пользователей, маршруты и секреты в админке; затем перезапустите сервис **`bot`** (бот читает конфиг при старте).
+4. Заполните пользователей и **группы** в админке (маршруты по **статусу** Redmine задаются в карточке группы — комната группы и список статусов; маршруты по **версии** — по ссылке с дашборда). Секреты — в **Настройках** (`/onboarding`). Хвост лога бота в разделе **События**: путь задаётся **`ADMIN_EVENTS_LOG_PATH`**, иначе `data/bot.log`. После изменений в БД перезапустите сервис **`bot`** (он перечитывает конфиг при старте).
 5. Для дедупликации на нескольких инстансах используется lease по пользователю (`bot_user_leases`) и state в `bot_issue_state`.
 
 Миграции схемы БД выполняются при старте сервиса **admin**: `alembic upgrade head`.
@@ -307,6 +307,7 @@ REDMINE_API_KEY=your_redmine_api_key
 | Переменная | Назначение |
 |------------|------------|
 | `ADMIN_LOGINS` | Список разрешённых логинов панели (через запятую); пусто = без ограничения |
+| `ADMIN_EVENTS_LOG_PATH` | Файл лога для `/events` в админке; пусто → `data/bot.log` от корня приложения админки |
 | `AUTH_TOKEN_SALT` | Соль для hash reset-токенов |
 | `SESSION_TTL_SECONDS` | Время жизни admin-сессии |
 | `RESET_TOKEN_TTL_SECONDS` | TTL токена сброса пароля |

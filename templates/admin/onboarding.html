@@ -2,7 +2,7 @@
 {% from "macros.html" import page_head %}
 {% block title %}Первичная настройка подключений{% endblock %}
 {% block content %}
-{{ page_head("Первичная настройка подключений", "Укажите служебные ключи для Redmine и Matrix. Можно пропустить этот шаг и вернуться позже в раздел «Интеграции».") }}
+{{ page_head("Первичная настройка подключений", "Укажите служебные ключи для Redmine и Matrix. Можно пропустить этот шаг и вернуться позже в раздел «Настройки».") }}
 {% if error %}<p class="error">{{ error }}</p>{% endif %}
 {% if missing %}
 <p class="muted">Ещё не заполнено: <code>{{ missing|join(", ") }}</code></p>

@@ -28,12 +28,17 @@
       </div>
     </div>
     <nav class="sidebar-nav">
-      <a class="nav-link {% if _path == '/' %}active{% endif %}" href="/"><i class="fa-solid fa-gauge-high"></i><span>Обзор</span></a>
-      <a class="nav-link {% if _path.startswith('/groups') %}active{% endif %}" href="/groups"><i class="fa-solid fa-layer-group"></i><span>Группы</span></a>
-      <a class="nav-link {% if _path.startswith('/users') %}active{% endif %}" href="/users"><i class="fa-solid fa-users"></i><span>Пользователи</span></a>
-      <a class="nav-link {% if _path.startswith('/routes') %}active{% endif %}" href="/routes/status"><i class="fa-solid fa-route"></i><span>Маршруты</span></a>
-      <a class="nav-link {% if _path.startswith('/onboarding') or _path.startswith('/secrets') %}active{% endif %}" href="/onboarding"><i class="fa-solid fa-plug"></i><span>Интеграции</span></a>
-      <a class="nav-link {% if _path.startswith('/me/settings') or _path.startswith('/matrix/bind') or _path.startswith('/app-users') %}active{% endif %}" href="/me/settings"><i class="fa-solid fa-gear"></i><span>Настройки</span></a>
+      <div class="sidebar-nav-main">
+        <a class="nav-link {% if _path == '/' %}active{% endif %}" href="/"><i class="fa-solid fa-gauge-high"></i><span>Дашборд</span></a>
+        <a class="nav-link {% if _path.startswith('/groups') %}active{% endif %}" href="/groups"><i class="fa-solid fa-layer-group"></i><span>Группы</span></a>
+        <a class="nav-link {% if _path.startswith('/users') %}active{% endif %}" href="/users"><i class="fa-solid fa-users"></i><span>Пользователи</span></a>
+        <a class="nav-link {% if _path.startswith('/onboarding') or _path.startswith('/secrets') %}active{% endif %}" href="/onboarding"><i class="fa-solid fa-gear"></i><span>Настройки</span></a>
+      </div>
+      {% if _current_user and _current_user.role == 'admin' %}
+      <div class="sidebar-nav-footer">
+        <a class="nav-link {% if _path.startswith('/events') %}active{% endif %}" href="/events"><i class="fa-solid fa-bolt"></i><span>События</span></a>
+      </div>
+      {% endif %}
     </nav>
   </aside>
 
@@ -45,12 +50,12 @@
         <div class="integration-banner" id="integration-banner" data-storage-key="admin_integration_banner_v1">
           <a class="banner-warn" href="/onboarding">
             <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
-            <span class="banner-warn__text">Интеграции не настроены — функционал ограничен.</span>
-            <span class="banner-warn__cta">Открыть мастер</span>
+            <span class="banner-warn__text">Подключения не настроены — функционал ограничен.</span>
+            <span class="banner-warn__cta">Открыть настройки</span>
           </a>
-          <a class="banner-warn banner-warn--compact" href="/onboarding" title="Интеграции не настроены — открыть мастер">
-            <i class="fa-solid fa-plug" aria-hidden="true"></i>
-            <span>Интеграции</span>
+          <a class="banner-warn banner-warn--compact" href="/onboarding" title="Подключения не настроены — открыть настройки">
+            <i class="fa-solid fa-gear" aria-hidden="true"></i>
+            <span>Настройки</span>
           </a>
           <button type="button" class="integration-banner__collapse" id="integration-banner-collapse" aria-expanded="true" aria-label="Свернуть напоминание">
             <i class="fa-solid fa-chevron-up" aria-hidden="true"></i>
@@ -68,7 +73,10 @@
           <div class="avatar" aria-hidden="true">{{ (_current_user.login[:1] or '?')|upper }}</div>
         </div>
         <div class="dropdown" id="user-dropdown" role="menu">
+          {% if _current_user.role != 'admin' %}
           <a href="/me/settings" role="menuitem"><i class="fa-solid fa-sliders"></i> Мои настройки</a>
+          {% endif %}
+          <a href="/matrix/bind" role="menuitem"><i class="fa-solid fa-link"></i> Привязка Matrix</a>
           {% if _current_user.role == 'admin' %}
           <a href="/app-users" role="menuitem"><i class="fa-solid fa-user-shield"></i> Аккаунты панели</a>
           {% endif %}

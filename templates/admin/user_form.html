@@ -14,7 +14,7 @@
   <div class="field">
     <label for="group_id">Группа</label>
     <select id="group_id" name="group_id">
-      <option value="">UNASSIGNED</option>
+      <option value="">{{ group_unassigned_display }}</option>
       {% for g in groups %}
       <option value="{{ g.id }}" {% if u and u.group_id == g.id %}selected{% endif %}>{{ g.name }}</option>
       {% endfor %}
@@ -23,48 +23,61 @@
 
   <div class="field">
     <label for="redmine_id">Redmine user ID</label>
-    <input type="number" id="redmine_id" name="redmine_id" required
-      value="{{ u.redmine_id if u else '' }}"/>
-  </div>
-
-  <div class="field">
-    <label for="redmine_search_q">Поиск в Redmine (имя/логин)</label>
-    <input
-      type="text"
-      id="redmine_search_q"
-      name="q"
-      placeholder="Начните ввод…"
-      hx-get="/redmine/users/search"
-      hx-trigger="keyup changed delay:400ms"
-      hx-target="#redmine_search_select"
-      hx-swap="innerHTML"
-      autocomplete="off"
-    />
-    <button class="btn btn-ghost" type="button"
-      hx-get="/redmine/users/search"
-      hx-include="#redmine_search_q"
-      hx-target="#redmine_search_select"
-      hx-swap="innerHTML">Найти</button>
-    <select id="redmine_search_select" size="6">
-      <option value="">Введите запрос</option>
-    </select>
+    <input type="number" id="redmine_id" name="redmine_id" required min="1" step="1"
+      value="{{ u.redmine_id if u else '' }}" placeholder="например, 42"/>
+    <p class="field-hint">Числовой id пользователя в Redmine (в профиле или в URL <code>/users/…</code>).</p>
+    <div class="inline-actions" style="margin-top:0.5rem; display:flex; flex-wrap:wrap; gap:0.5rem; align-items:center;">
+      <button type="button" class="btn btn-ghost" id="redmine_lookup_btn">Подставить имя из Redmine</button>
+      <span id="redmine_lookup_status" class="muted" role="status" aria-live="polite"></span>
+    </div>
   </div>
 
   <script>
     document.addEventListener('DOMContentLoaded', function () {
-      const sel = document.getElementById('redmine_search_select');
-      const inp = document.getElementById('redmine_id');
-      if (!sel || !inp) return;
-      sel.addEventListener('change', function () {
-        const option = sel.options[sel.selectedIndex];
-        const v = option ? option.value : '';
-        if (v) inp.value = v;
-        const displayName = option ? option.getAttribute('data-display-name') : '';
-        const displayInput = document.getElementById('display_name');
-        if (displayInput && displayName && !displayInput.value.trim()) {
-          displayInput.value = displayName;
+      const btn = document.getElementById('redmine_lookup_btn');
+      const rid = document.getElementById('redmine_id');
+      const dname = document.getElementById('display_name');
+      const st = document.getElementById('redmine_lookup_status');
+      if (!btn || !rid) return;
+      function setStatus(msg) {
+        if (st) st.textContent = msg || '';
+      }
+      const messages = {
+        not_configured: 'Redmine не настроен (URL/API key).',
+        not_found: 'Пользователь с таким ID не найден.',
+        invalid_id: 'Введите положительный числовой ID.',
+        cooldown: 'Поиск временно недоступен, подождите минуту.',
+        timeout: 'Таймаут запроса к Redmine.',
+        error: 'Ошибка запроса к Redmine.',
+      };
+      async function lookup() {
+        const id = String(rid.value || '').trim();
+        if (!id || !/^[1-9]\d*$/.test(id)) {
+          setStatus(messages.invalid_id);
+          return;
         }
-      });
+        setStatus('Запрос…');
+        btn.disabled = true;
+        try {
+          const r = await fetch('/redmine/users/lookup?user_id=' + encodeURIComponent(id), {
+            headers: { Accept: 'application/json' },
+            credentials: 'same-origin',
+          });
+          const data = await r.json().catch(function () { return {}; });
+          if (r.ok && data.ok && data.display_name) {
+            if (dname) dname.value = data.display_name;
+            setStatus(data.login ? ('Подставлено: ' + data.display_name + ' (' + data.login + ')') : 'Подставлено: ' + data.display_name);
+          } else {
+            const code = data.error || (r.status === 404 ? 'not_found' : 'error');
+            setStatus(messages[code] || ('Ошибка: ' + (code || r.status)));
+          }
+        } catch (e) {
+          setStatus(messages.error);
+        } finally {
+          btn.disabled = false;
+        }
+      }
+      btn.addEventListener('click', lookup);
     });
   </script>
 

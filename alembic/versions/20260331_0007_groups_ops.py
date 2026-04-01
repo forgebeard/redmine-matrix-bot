@@ -16,14 +16,6 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
-SEED_GROUPS: list[tuple[str, str]] = [
-    ("Отдел технической поддержки РЕД ОС", ""),
-    ("Отдел технической поддержки РЕД АДМ", ""),
-    ("Отдел технической поддержки РЕД Базы Данных", ""),
-    ("Отдел технической поддержки РЕД Виртуализации", ""),
-    ("Отдел приема обращений", ""),
-    ("Отдел развития технической поддержки системных и инфраструктурных продуктов", ""),
-]
 UNASSIGNED_NAME = "UNASSIGNED"
 
 
@@ -76,13 +68,6 @@ def upgrade() -> None:
             "ON CONFLICT (name) DO NOTHING"
         ),
         [{"name": UNASSIGNED_NAME, "room_id": ""}],
-    )
-    conn.execute(
-        sa.text(
-            "INSERT INTO support_groups (name, room_id, is_active) VALUES (:name, :room_id, true) "
-            "ON CONFLICT (name) DO NOTHING"
-        ),
-        [{"name": name, "room_id": room_id} for name, room_id in SEED_GROUPS],
     )
 
     # Точное сопоставление legacy department -> support_groups.name.

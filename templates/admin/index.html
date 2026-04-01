@@ -1,11 +1,10 @@
 {% extends "base.html" %}
-{% block title %}Обзор{% endblock %}
+{% block title %}Дашборд{% endblock %}
 {% block content %}
 <header class="page-head">
   <div class="page-head-row">
     <div class="page-head-text">
-      <h1>Обзор</h1>
-      <p class="lead">Конфигурация хранится в PostgreSQL. После изменений перезапустите контейнер <code>bot</code>, т.к. он читает конфиг при старте.</p>
+      <h1>Дашборд</h1>
     </div>
   </div>
 </header>
@@ -21,18 +20,18 @@
     <div class="stat-value">{{ status_routes_count }}</div>
     <i class="fa-solid fa-route stat-icon" aria-hidden="true"></i>
   </div>
-  <div class="card stat-card">
+  <a class="card stat-card stat-card--link" href="/routes/version">
     <div class="stat-label">Маршруты по версии</div>
     <div class="stat-value">{{ version_routes_count }}</div>
     <i class="fa-solid fa-code-branch stat-icon" aria-hidden="true"></i>
-  </div>
+  </a>
 </div>
 
 <div class="card" style="margin-top:1.25rem;">
   <h2 style="margin-top:0;">Быстрые действия</h2>
   <p class="page-actions">
     <a class="btn btn-primary" href="/users"><i class="fa-solid fa-users"></i> Управление пользователями</a>
-    <a class="btn btn-ghost" href="/onboarding"><i class="fa-solid fa-wand-magic-sparkles"></i> Онбординг интеграций</a>
+    <a class="btn btn-ghost" href="/onboarding"><i class="fa-solid fa-gear"></i> Настройки подключений</a>
     <a class="btn btn-ghost" href="/app-users"><i class="fa-solid fa-user-shield"></i> Аккаунты панели</a>
   </p>
 </div>

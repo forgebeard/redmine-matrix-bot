@@ -13,6 +13,9 @@
 
 Тесты корневого bot.py дополнительно импортируют bot из корня; этот файл
 обслуживает и src-тесты, и test_bot.py.
+
+Автопатч rate limiter в admin_main (см. фикстуру ниже), чтобы серия POST /login
+в интеграционных тестах не упиралась в лимит 5/мин с одного IP.
 """
 
 import os
@@ -132,3 +135,16 @@ def mock_matrix_client():
     success.__class__ = type("RoomSendResponse", (), {})
     client.room_send = AsyncMock(return_value=success)
     return client
+
+
+@pytest.fixture(autouse=True)
+def _no_admin_rate_limits_for_http_tests(monkeypatch):
+    """
+    Несколько интеграционных тестов подряд делают POST /login с одного IP TestClient —
+    иначе срабатывает лимит 5/мин в admin_main.
+    """
+    try:
+        import admin_main
+    except ImportError:
+        return
+    monkeypatch.setattr(admin_main._rate_limiter, "hit", lambda key, limit, window_seconds: True)

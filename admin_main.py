@@ -29,11 +29,11 @@ _ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(_ROOT / "src"))
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import delete, or_, select
+from sqlalchemy import delete, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from nio import AsyncClient
@@ -135,7 +135,15 @@ COOKIE_SECURE = os.getenv("COOKIE_SECURE", "0").strip().lower() in ("1", "true",
 SETUP_PATH = "/setup"
 SESSION_IDLE_TIMEOUT_SECONDS = int(os.getenv("ADMIN_SESSION_IDLE_TIMEOUT", "1800"))
 RUNTIME_STATUS_FILE = os.getenv("BOT_RUNTIME_STATUS_FILE", "/app/data/runtime_status.json")
+# Системная строка в support_groups (миграции); в UI не показываем как обычную группу.
 GROUP_UNASSIGNED_NAME = "UNASSIGNED"
+# Подпись в интерфейсе для пользователей без group_id и для фильтра «только без группы».
+GROUP_UNASSIGNED_DISPLAY = "Без группы"
+# Совпадает с подписью первой опции фильтра на /users — запись в support_groups с этим именем даёт дубль в select.
+GROUP_USERS_FILTER_ALL_LABEL = "Все группы"
+
+_jinja_env.globals["GROUP_UNASSIGNED_NAME"] = GROUP_UNASSIGNED_NAME
+_jinja_env.globals["GROUP_UNASSIGNED_DISPLAY"] = GROUP_UNASSIGNED_DISPLAY
 
 AUTH_TOKEN_SALT = os.getenv("AUTH_TOKEN_SALT", "dev-token-salt")
 SESSION_TTL_SECONDS = int(os.getenv("SESSION_TTL_SECONDS", "86400"))
@@ -213,6 +221,67 @@ def _client_ip(request: Request) -> str:
     if xff:
         return xff.split(",")[0].strip()
     return request.client.host if request.client else "unknown"
+
+
+def _admin_events_log_path() -> Path:
+    raw = (os.getenv("ADMIN_EVENTS_LOG_PATH") or "").strip()
+    if raw:
+        return Path(raw)
+    return _ROOT / "data" / "bot.log"
+
+
+def _read_log_tail(path: Path, *, max_lines: int = 400, max_bytes: int = 256_000) -> str:
+    try:
+        if not path.is_file():
+            return (
+                f"Файл лога не найден: {path}\n"
+                "Проверьте LOG_TO_FILE у бота, том data/ и переменную ADMIN_EVENTS_LOG_PATH."
+            )
+        with path.open("rb") as f:
+            f.seek(0, os.SEEK_END)
+            size = f.tell()
+            f.seek(max(0, size - max_bytes))
+            chunk = f.read().decode("utf-8", errors="replace")
+        lines = chunk.splitlines()
+        return "\n".join(lines[-max_lines:]) if lines else ""
+    except OSError as e:
+        return f"Не удалось прочитать лог: {e}"
+
+
+def _parse_status_keys_list(raw: str) -> list[str]:
+    parts = [p.strip() for p in (raw or "").replace("\n", ",").split(",")]
+    out: list[str] = []
+    seen: set[str] = set()
+    for p in parts:
+        if not p or p in seen:
+            continue
+        seen.add(p)
+        out.append(p)
+    return out
+
+
+def _groups_assignable(groups: list) -> list:
+    return [
+        g
+        for g in groups
+        if getattr(g, "name", None) != GROUP_UNASSIGNED_NAME
+        and (getattr(g, "name", None) or "").strip() != GROUP_USERS_FILTER_ALL_LABEL
+    ]
+
+
+def _is_reserved_support_group(row) -> bool:
+    return row is not None and getattr(row, "name", None) == GROUP_UNASSIGNED_NAME
+
+
+def _group_display_name(groups_by_id: dict, group_id: int | None) -> str:
+    if group_id is None:
+        return GROUP_UNASSIGNED_DISPLAY
+    g = groups_by_id.get(group_id)
+    if not g:
+        return GROUP_UNASSIGNED_DISPLAY
+    if g.name == GROUP_UNASSIGNED_NAME:
+        return GROUP_UNASSIGNED_DISPLAY
+    return g.name
 
 
 def _ensure_csrf(request: Request) -> tuple[str, bool]:
@@ -1178,7 +1247,8 @@ async def groups_list(
         like = f"%{q}%"
         stmt = stmt.where(or_(SupportGroup.name.ilike(like), SupportGroup.room_id.ilike(like)))
     stmt = stmt.order_by(SupportGroup.is_active.desc(), SupportGroup.name.asc())
-    rows = list((await session.execute(stmt)).scalars().all())
+    _all_groups = list((await session.execute(stmt)).scalars().all())
+    rows = [r for r in _all_groups if r.name != GROUP_UNASSIGNED_NAME]
     return templates.TemplateResponse(
         request,
         "groups_list.html",
@@ -1199,7 +1269,14 @@ async def groups_new(
     return templates.TemplateResponse(
         request,
         "group_form.html",
-        {"title": "Новая группа", "g": None, "bot_tz": os.getenv("BOT_TIMEZONE", "Europe/Moscow")},
+        {
+            "title": "Новая группа",
+            "g": None,
+            "bot_tz": os.getenv("BOT_TIMEZONE", "Europe/Moscow"),
+            "status_routes": [],
+            "status_err": "",
+            "status_msg": "",
+        },
     )
 
 
@@ -1215,10 +1292,24 @@ async def groups_edit(
     row = await session.get(SupportGroup, group_id)
     if not row:
         raise HTTPException(404, "Группа не найдена")
+    if _is_reserved_support_group(row):
+        raise HTTPException(404, "Группа не найдена")
+    status_err = (request.query_params.get("status_err") or "").strip()
+    status_msg = (request.query_params.get("status_msg") or "").strip()
+    room = (row.room_id or "").strip()
+    sr_stmt = select(StatusRoomRoute).where(StatusRoomRoute.room_id == room).order_by(StatusRoomRoute.status_key)
+    status_rows = list((await session.execute(sr_stmt)).scalars().all()) if room else []
     return templates.TemplateResponse(
         request,
         "group_form.html",
-        {"title": "Редактирование группы", "g": row, "bot_tz": os.getenv("BOT_TIMEZONE", "Europe/Moscow")},
+        {
+            "title": "Редактирование группы",
+            "g": row,
+            "bot_tz": os.getenv("BOT_TIMEZONE", "Europe/Moscow"),
+            "status_routes": status_rows,
+            "status_err": status_err,
+            "status_msg": status_msg,
+        },
     )
 
 
@@ -1229,6 +1320,7 @@ async def groups_create(
     room_id: Annotated[str, Form()] = "",
     timezone_name: Annotated[str, Form()] = "",
     is_active: Annotated[str, Form()] = "",
+    initial_status_keys: Annotated[str, Form()] = "",
     csrf_token: Annotated[str, Form()] = "",
     session: AsyncSession = Depends(get_session),
 ):
@@ -1239,6 +1331,8 @@ async def groups_create(
     n = (name or "").strip()
     if not n:
         raise HTTPException(400, "Название обязательно")
+    if n == GROUP_UNASSIGNED_NAME:
+        raise HTTPException(400, "Это имя зарезервировано для системы")
     row = SupportGroup(
         name=n,
         room_id=(room_id or "").strip(),
@@ -1247,7 +1341,15 @@ async def groups_create(
     )
     session.add(row)
     await session.flush()
-    return RedirectResponse("/groups", status_code=303)
+    rid = row.id
+    room = (row.room_id or "").strip()
+    if room:
+        for key in _parse_status_keys_list(initial_status_keys):
+            ex = await session.execute(select(StatusRoomRoute.id).where(StatusRoomRoute.status_key == key))
+            if ex.scalar_one_or_none():
+                continue
+            session.add(StatusRoomRoute(status_key=key, room_id=room))
+    return RedirectResponse(f"/groups/{rid}/edit", status_code=303)
 
 
 @app.post("/groups/{group_id}")
@@ -1268,14 +1370,75 @@ async def groups_update(
     row = await session.get(SupportGroup, group_id)
     if not row:
         raise HTTPException(404, "Группа не найдена")
+    if _is_reserved_support_group(row):
+        raise HTTPException(403, "Системную группу нельзя менять")
     n = (name or "").strip()
     if not n:
         raise HTTPException(400, "Название обязательно")
+    if n == GROUP_UNASSIGNED_NAME:
+        raise HTTPException(400, "Это имя зарезервировано для системы")
+    old_room = (row.room_id or "").strip()
+    new_room = (room_id or "").strip()
     row.name = n
-    row.room_id = (room_id or "").strip()
+    row.room_id = new_room
     row.timezone = (timezone_name or "").strip() or None
     row.is_active = is_active in ("1", "on", "true")
-    return RedirectResponse("/groups", status_code=303)
+    if old_room and new_room and old_room != new_room:
+        await session.execute(
+            update(StatusRoomRoute).where(StatusRoomRoute.room_id == old_room).values(room_id=new_room)
+        )
+    return RedirectResponse(f"/groups/{group_id}/edit", status_code=303)
+
+
+@app.post("/groups/{group_id}/status-routes/add")
+async def group_status_route_add(
+    request: Request,
+    group_id: int,
+    status_key: Annotated[str, Form()],
+    csrf_token: Annotated[str, Form()] = "",
+    session: AsyncSession = Depends(get_session),
+):
+    _verify_csrf(request, csrf_token)
+    user = getattr(request.state, "current_user", None)
+    if not user or getattr(user, "role", "") != "admin":
+        raise HTTPException(403, "Только admin")
+    row = await session.get(SupportGroup, group_id)
+    if not row or _is_reserved_support_group(row):
+        raise HTTPException(404, "Группа не найдена")
+    room = (row.room_id or "").strip()
+    if not room:
+        return RedirectResponse(f"/groups/{group_id}/edit?status_err=no_room", status_code=303)
+    key = (status_key or "").strip()
+    if not key:
+        return RedirectResponse(f"/groups/{group_id}/edit?status_err=empty", status_code=303)
+    exists = await session.execute(select(StatusRoomRoute).where(StatusRoomRoute.status_key == key))
+    if exists.scalar_one_or_none():
+        return RedirectResponse(f"/groups/{group_id}/edit?status_err=exists", status_code=303)
+    session.add(StatusRoomRoute(status_key=key, room_id=room))
+    return RedirectResponse(f"/groups/{group_id}/edit?status_msg=added", status_code=303)
+
+
+@app.post("/groups/{group_id}/status-routes/{route_row_id}/delete")
+async def group_status_route_delete(
+    request: Request,
+    group_id: int,
+    route_row_id: int,
+    csrf_token: Annotated[str, Form()] = "",
+    session: AsyncSession = Depends(get_session),
+):
+    _verify_csrf(request, csrf_token)
+    user = getattr(request.state, "current_user", None)
+    if not user or getattr(user, "role", "") != "admin":
+        raise HTTPException(403, "Только admin")
+    row = await session.get(SupportGroup, group_id)
+    if not row or _is_reserved_support_group(row):
+        raise HTTPException(404, "Группа не найдена")
+    room = (row.room_id or "").strip()
+    rte = await session.get(StatusRoomRoute, route_row_id)
+    if not rte or (rte.room_id or "").strip() != room:
+        raise HTTPException(404, "Маршрут не найден")
+    await session.delete(rte)
+    return RedirectResponse(f"/groups/{group_id}/edit?status_msg=deleted", status_code=303)
 
 
 @app.post("/groups/{group_id}/delete")
@@ -1291,6 +1454,8 @@ async def groups_delete(
         raise HTTPException(403, "Только admin")
     row = await session.get(SupportGroup, group_id)
     if row:
+        if _is_reserved_support_group(row):
+            raise HTTPException(403, "Системную группу нельзя удалить")
         await session.delete(row)
     return RedirectResponse("/groups", status_code=303)
 
@@ -1330,10 +1495,7 @@ async def users_list(
 
     grouped: dict[str, list[BotUser]] = {}
     for row in rows:
-        if row.group_id is None:
-            key = GROUP_UNASSIGNED_NAME
-        else:
-            key = groups_by_id.get(row.group_id).name if groups_by_id.get(row.group_id) else GROUP_UNASSIGNED_NAME
+        key = _group_display_name(groups_by_id, row.group_id)
         grouped.setdefault(key, []).append(row)
 
     return templates.TemplateResponse(
@@ -1342,11 +1504,10 @@ async def users_list(
         {
             "users": rows,
             "grouped_users": grouped,
-            "groups": groups_rows,
+            "groups": _groups_assignable(groups_rows),
             "groups_by_id": groups_by_id,
             "q": q,
             "group_filter": group_id,
-            "group_unassigned_name": GROUP_UNASSIGNED_NAME,
         },
     )
 
@@ -1369,7 +1530,8 @@ async def users_new(
             "notify_json": '["all"]',
             "notify_preset": "all",
             "notify_selected": ["all"],
-            "groups": groups_rows,
+            "groups": _groups_assignable(groups_rows),
+            "group_unassigned_display": GROUP_UNASSIGNED_DISPLAY,
             "bot_tz": os.getenv("BOT_TIMEZONE", "Europe/Moscow"),
         },
     )
@@ -1501,7 +1663,8 @@ async def users_edit(
             "notify_json": json.dumps(row.notify, ensure_ascii=False),
             "notify_preset": _notify_preset(row.notify),
             "notify_selected": row.notify or ["all"],
-            "groups": groups_rows,
+            "groups": _groups_assignable(groups_rows),
+            "group_unassigned_display": GROUP_UNASSIGNED_DISPLAY,
             "bot_tz": os.getenv("BOT_TIMEZONE", "Europe/Moscow"),
         },
     )
@@ -1660,43 +1823,78 @@ async def redmine_users_search(
     return HTMLResponse("".join(opts))
 
 
-# --- Маршруты по статусу ---
+def _fetch_redmine_user_by_id(redmine_user_id: int) -> tuple[dict | None, str | None]:
+    """GET /users/:id.json → (user dict, None) или (None, error_code)."""
+    if not REDMINE_URL or not REDMINE_API_KEY:
+        return None, "not_configured"
+    from urllib.error import HTTPError, URLError
+    from urllib.request import Request, urlopen
+
+    url = f"{REDMINE_URL.rstrip('/')}/users/{redmine_user_id}.json"
+    req = Request(url, headers={"X-Redmine-API-Key": REDMINE_API_KEY})
+    try:
+        with urlopen(req, timeout=5.0) as r:
+            payload = json.loads(r.read().decode("utf-8", errors="replace"))
+        u = payload.get("user") if isinstance(payload, dict) else None
+        if not isinstance(u, dict):
+            return None, "bad_response"
+        return u, None
+    except HTTPError as e:
+        if e.code == 404:
+            return None, "not_found"
+        return None, f"http_{e.code}"
+    except URLError:
+        return None, "timeout"
+    except Exception:
+        return None, "error"
 
 
-@app.get("/routes/status", response_class=HTMLResponse)
-async def routes_status(
-    request: Request,
-    q: str = "",
-    added: int = 0,
-    skipped: int = 0,
-    error: str = "",
-    session: AsyncSession = Depends(get_session),
-):
+@app.get("/redmine/users/lookup")
+async def redmine_user_lookup(request: Request, user_id: int):
+    """
+    JSON для формы пользователя: по числовому Redmine user id подставить отображаемое имя.
+    """
     user = getattr(request.state, "current_user", None)
     if not user or getattr(user, "role", "") != "admin":
         raise HTTPException(403, "Только admin")
-    stmt = select(StatusRoomRoute)
-    q = (q or "").strip()
-    if q:
-        like = f"%{q}%"
-        stmt = stmt.where(
-            or_(
-                StatusRoomRoute.status_key.ilike(like),
-                StatusRoomRoute.room_id.ilike(like),
-            )
-        )
-    stmt = stmt.order_by(StatusRoomRoute.status_key)
-    r = await session.execute(stmt)
-    rows = list(r.scalars().all())
-    room_map: dict[str, list[str]] = {}
-    for row in rows:
-        room_map.setdefault(row.room_id, []).append(row.status_key)
-    room_map = {k: sorted(v) for k, v in sorted(room_map.items(), key=lambda x: x[0])}
-    return templates.TemplateResponse(
-        request,
-        "routes_status.html",
-        {"rows": rows, "room_map": room_map, "added": added, "skipped": skipped, "error": error, "q": q},
+    if user_id < 1:
+        return JSONResponse({"ok": False, "error": "invalid_id"}, status_code=400)
+    if _redmine_search_breaker.blocked():
+        return JSONResponse({"ok": False, "error": "cooldown"}, status_code=503)
+
+    raw, err = await asyncio.to_thread(_fetch_redmine_user_by_id, user_id)
+    if err == "not_configured":
+        return JSONResponse({"ok": False, "error": "not_configured"})
+    if err == "not_found":
+        return JSONResponse({"ok": False, "error": "not_found"}, status_code=404)
+    if err:
+        _redmine_search_breaker.on_failure()
+        return JSONResponse({"ok": False, "error": err}, status_code=502)
+    _redmine_search_breaker.on_success()
+
+    firstname = str(raw.get("firstname") or "").strip()
+    lastname = str(raw.get("lastname") or "").strip()
+    login = str(raw.get("login") or "").strip()
+    label = " ".join(s for s in (firstname, lastname) if s).strip()
+    if not label:
+        label = login or str(user_id)
+    return JSONResponse(
+        {
+            "ok": True,
+            "redmine_id": user_id,
+            "display_name": label,
+            "login": login,
+        }
     )
+
+
+# --- Маршруты по статусу ---
+
+
+@app.get("/routes/status")
+async def routes_status_legacy_redirect():
+    """Старый URL: маршруты статусов настраиваются в карточке группы."""
+    return RedirectResponse("/groups", status_code=303)
 
 
 @app.post("/routes/status")
@@ -1714,12 +1912,12 @@ async def routes_status_add(
     key = status_key.strip()
     room = room_id.strip()
     if not key or not room:
-        return RedirectResponse("/routes/status?error=Заполните+оба+поля", status_code=303)
+        return RedirectResponse("/groups", status_code=303)
     exists = await session.execute(select(StatusRoomRoute).where(StatusRoomRoute.status_key == key))
     if exists.scalar_one_or_none():
-        return RedirectResponse("/routes/status?added=0&skipped=1", status_code=303)
+        return RedirectResponse("/groups", status_code=303)
     session.add(StatusRoomRoute(status_key=key, room_id=room))
-    return RedirectResponse("/routes/status?added=1&skipped=0", status_code=303)
+    return RedirectResponse("/groups", status_code=303)
 
 
 @app.post("/routes/status/by-room")
@@ -1751,7 +1949,7 @@ async def routes_status_add_by_room(
         session.add(StatusRoomRoute(status_key=key, room_id=room))
         existing.add(key)
         added += 1
-    return RedirectResponse(f"/routes/status?added={added}&skipped={skipped}", status_code=303)
+    return RedirectResponse("/groups", status_code=303)
 
 
 @app.post("/routes/status/{row_id}/delete")
@@ -1766,7 +1964,7 @@ async def routes_status_del(
     if not user or getattr(user, "role", "") != "admin":
         raise HTTPException(403, "Только admin")
     await session.execute(delete(StatusRoomRoute).where(StatusRoomRoute.id == row_id))
-    return RedirectResponse("/routes/status", status_code=303)
+    return RedirectResponse("/groups", status_code=303)
 
 
 # --- Маршруты по версии ---
@@ -1818,6 +2016,26 @@ async def routes_version_del(
         raise HTTPException(403, "Только admin")
     await session.execute(delete(VersionRoomRoute).where(VersionRoomRoute.id == row_id))
     return RedirectResponse("/routes/version", status_code=303)
+
+
+# --- События (хвост файла лога бота) ---
+
+
+@app.get("/events", response_class=HTMLResponse)
+async def events_page(request: Request):
+    user = getattr(request.state, "current_user", None)
+    if not user or getattr(user, "role", "") != "admin":
+        raise HTTPException(403, "Только admin")
+    return templates.TemplateResponse(request, "events.html", {})
+
+
+@app.get("/events/tail", response_class=HTMLResponse)
+async def events_log_tail(request: Request):
+    user = getattr(request.state, "current_user", None)
+    if not user or getattr(user, "role", "") != "admin":
+        raise HTTPException(403, "Только admin")
+    text = _read_log_tail(_admin_events_log_path())
+    return HTMLResponse(f'<pre class="log-tail" id="events-log-pre">{html_escape(text)}</pre>')
 
 
 # --- Matrix room binding (one-time code) ---
@@ -1996,6 +2214,8 @@ async def me_settings_get(
     user = getattr(request.state, "current_user", None)
     if not user:
         return RedirectResponse("/login", status_code=303)
+    if getattr(user, "role", "") == "admin":
+        return RedirectResponse("/", status_code=303)
 
     redmine_id = getattr(user, "redmine_id", None)
     csrf_token, set_cookie = _ensure_csrf(request)
@@ -2074,6 +2294,8 @@ async def me_settings_post(
     user = getattr(request.state, "current_user", None)
     if not user:
         return RedirectResponse("/login", status_code=303)
+    if getattr(user, "role", "") == "admin":
+        return RedirectResponse("/", status_code=303)
 
     redmine_id = getattr(user, "redmine_id", None)
     if redmine_id is None:

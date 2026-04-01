@@ -16,7 +16,7 @@
       <label for="group_id">Группа</label>
       <select id="group_id" name="group_id">
         <option value="">Все группы</option>
-        <option value="-1" {% if group_filter == -1 %}selected{% endif %}>{{ group_unassigned_name }}</option>
+        <option value="-1" {% if group_filter == -1 %}selected{% endif %}>{{ GROUP_UNASSIGNED_DISPLAY }}</option>
         {% for g in groups %}
           <option value="{{ g.id }}" {% if group_filter == g.id %}selected{% endif %}>{{ g.name }}</option>
         {% endfor %}
@@ -50,7 +50,7 @@
           <td>{{ u.display_name or "—" }}</td>
           <td>{{ u.redmine_id }}</td>
           <td>{{ room_cell(u.room) }}</td>
-          <td>{% if u.group_id and groups_by_id.get(u.group_id) %}{{ groups_by_id.get(u.group_id).name }}{% else %}{{ group_unassigned_name }}{% endif %}</td>
+          <td>{% set g = groups_by_id.get(u.group_id) if u.group_id else none %}{% if not g %}{{ GROUP_UNASSIGNED_DISPLAY }}{% elif g.name == GROUP_UNASSIGNED_NAME %}{{ GROUP_UNASSIGNED_DISPLAY }}{% else %}{{ g.name }}{% endif %}</td>
           <td>{{ "да" if u.dnd else "нет" }}</td>
           <td class="table-actions">
             <a class="btn btn-ghost" href="/users/{{ u.id }}/edit">Изменить</a>
