@@ -1,6 +1,7 @@
 # Секреты
 .env
 master_key.txt
+data/.app_master_key
 *.key
 
 # Виртуальное окружение

@@ -12,8 +12,18 @@
 обслуживает и src-тесты, и test_bot.py.
 """
 
+import os
 import sys
 from pathlib import Path
+
+# Стандартный DSN для CI/локального pytest (postgres из .github/workflows).
+# python-dotenv при импорте приложения не перезаписывает уже заданные переменные.
+# Чтобы гонять тесты против своего .env: TEST_USE_LOCAL_ENV=1 pytest ...
+if not os.getenv("TEST_USE_LOCAL_ENV"):
+    os.environ["DATABASE_URL"] = os.getenv(
+        "TEST_DATABASE_URL",
+        "postgresql://bot:postgres@127.0.0.1:5432/redmine_matrix",
+    )
 from datetime import date, timedelta
 from unittest.mock import AsyncMock, MagicMock
 

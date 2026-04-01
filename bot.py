@@ -66,6 +66,15 @@ MATRIX_DEVICE_ID = os.getenv("MATRIX_DEVICE_ID")
 REDMINE_URL = os.getenv("REDMINE_URL")
 REDMINE_KEY = os.getenv("REDMINE_API_KEY")
 
+
+def _integration_secret_names() -> list[str]:
+    raw = os.getenv(
+        "REQUIRED_SECRET_NAMES",
+        "REDMINE_URL,REDMINE_API_KEY,MATRIX_HOMESERVER,MATRIX_ACCESS_TOKEN,MATRIX_USER_ID,MATRIX_DEVICE_ID",
+    )
+    return [x.strip() for x in raw.split(",") if x.strip()]
+
+
 # --- Таймзона ---
 BOT_TZ = ZoneInfo(os.getenv("BOT_TIMEZONE", "Europe/Moscow"))
 
@@ -1002,21 +1011,38 @@ async def cleanup_state_files(redmine):
 
 async def main():
     global USERS, STATUS_ROOM_MAP, VERSION_ROOM_MAP
+    global HOMESERVER, ACCESS_TOKEN, MATRIX_USER_ID, MATRIX_DEVICE_ID, REDMINE_URL, REDMINE_KEY
 
     logger.info("🚀 Бот запущен")
 
-    # --- Проверка обязательных настроек ---
-    if not all([HOMESERVER, ACCESS_TOKEN, MATRIX_USER_ID, REDMINE_URL, REDMINE_KEY]):
-        logger.error("❌ Не заданы обязательные переменные в .env")
-        return
-
-    # Бот всегда стартует в DB-only режиме: конфиг берём из Postgres.
+    u: list = []
+    sm: dict = {}
+    vm: dict = {}
     try:
+        from database.app_secret_values import load_decrypted_secrets, merge_secret
         from database.load_config import fetch_runtime_config
+        from database.session import get_session_factory
 
-        u, sm, vm = await fetch_runtime_config()
+        factory = get_session_factory()
+        async with factory() as session:
+            u, sm, vm = await fetch_runtime_config(session)
+            db_secrets = await load_decrypted_secrets(session, _integration_secret_names())
+
+        HOMESERVER = merge_secret(db_secrets, "MATRIX_HOMESERVER", HOMESERVER)
+        ACCESS_TOKEN = merge_secret(db_secrets, "MATRIX_ACCESS_TOKEN", ACCESS_TOKEN)
+        MATRIX_USER_ID = merge_secret(db_secrets, "MATRIX_USER_ID", MATRIX_USER_ID)
+        MATRIX_DEVICE_ID = merge_secret(db_secrets, "MATRIX_DEVICE_ID", MATRIX_DEVICE_ID)
+        REDMINE_URL = merge_secret(db_secrets, "REDMINE_URL", REDMINE_URL)
+        REDMINE_KEY = merge_secret(db_secrets, "REDMINE_API_KEY", REDMINE_KEY)
     except Exception as e:
         logger.error("❌ Не удалось загрузить конфиг из БД: %s", e, exc_info=True)
+        return
+
+    if not all([HOMESERVER, ACCESS_TOKEN, MATRIX_USER_ID, REDMINE_URL, REDMINE_KEY]):
+        logger.error(
+            "❌ Не заданы интеграции Matrix/Redmine: укажите в админке (онбординг / секреты) "
+            "или в окружении MATRIX_* и REDMINE_*"
+        )
         return
 
     if not u:
@@ -1049,7 +1075,7 @@ async def main():
     client = AsyncClient(HOMESERVER)
     client.access_token = ACCESS_TOKEN
     client.user_id      = MATRIX_USER_ID
-    client.device_id    = MATRIX_DEVICE_ID
+    client.device_id    = MATRIX_DEVICE_ID or "redmine_bot"
 
     try:
         resp = await client.whoami()

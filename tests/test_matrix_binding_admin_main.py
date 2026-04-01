@@ -28,28 +28,29 @@ def test_matrix_bind_redirects_to_login_without_auth(client: TestClient):
 def test_matrix_bind_flow_dev_echo_updates_bot_user_room(client: TestClient):
     os.environ["MATRIX_CODE_DEV_ECHO"] = "1"
 
-    email = "matrix_user@example.com"
+    admin_login = "matrix_user"
     redmine_id = 123
     room_id = "!room123:example.com"
 
-    setup = client.get("/setup")
-    csrf = setup.cookies.get("admin_csrf")
-    client.post(
-        "/setup",
-        data={"email": email, "password": "StrongPassword123", "csrf_token": csrf},
-        follow_redirects=False,
+    from tests.support_admin import ensure_admin_logged_in
+
+    ensure_admin_logged_in(
+        client,
+        final_login=admin_login,
+        final_password="StrongPassword123",
     )
-    login = client.get("/login")
-    csrf_login = login.cookies.get("admin_csrf")
-    client.post(
-        "/login",
-        data={"email": email, "password": "StrongPassword123", "csrf_token": csrf_login},
-        follow_redirects=True,
-    )
+
+    bind_page = client.get("/matrix/bind")
+    csrf_bind = bind_page.cookies.get("admin_csrf")
+    assert csrf_bind, "ожидается CSRF cookie после открытия /matrix/bind"
 
     start = client.post(
         "/matrix/bind/start",
-        data={"redmine_id": str(redmine_id), "room_id": room_id},
+        data={
+            "redmine_id": str(redmine_id),
+            "room_id": room_id,
+            "csrf_token": csrf_bind,
+        },
         follow_redirects=True,
     )
     assert start.status_code == 200
@@ -57,9 +58,15 @@ def test_matrix_bind_flow_dev_echo_updates_bot_user_room(client: TestClient):
     assert m, f"Не найден Dev code в ответе: {start.text[:300]}"
     code = m.group(1)
 
+    csrf_confirm = client.cookies.get("admin_csrf") or csrf_bind
     confirm = client.post(
         "/matrix/bind/confirm",
-        data={"redmine_id": str(redmine_id), "room_id": room_id, "code": code},
+        data={
+            "redmine_id": str(redmine_id),
+            "room_id": room_id,
+            "code": code,
+            "csrf_token": csrf_confirm,
+        },
         follow_redirects=False,
     )
     assert confirm.status_code in (303, 302)

@@ -2,13 +2,17 @@
 {% block title %}Вход{% endblock %}
 {% block content %}
   <h1>Вход в панель</h1>
-  <p class="muted">Войдите по email и паролю для доступа к настройкам.</p>
+  {% if bootstrap_hint %}
+  <p class="muted">Первый запуск: встроенные учётные данные — <strong>admin</strong> / <strong>admin</strong>. После входа потребуется сменить логин и пароль. Сброс через CLI: <code>scripts/manage_admin_credentials.py</code>.</p>
+  {% else %}
+  <p class="muted">Войдите по логину и паролю. Сброс пароля и смена логина — через CLI на сервере.</p>
+  {% endif %}
   {% if error %}<p class="error">{{ error }}</p>{% endif %}
   <form class="form" method="post" action="/login">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}"/>
     <div class="field">
-      <label for="email">Email</label>
-      <input type="email" id="email" name="email" required autocomplete="email"/>
+      <label for="login">Логин</label>
+      <input type="text" id="login" name="login" required autocomplete="username" minlength="1"/>
     </div>
     <div class="field">
       <label for="password">Пароль</label>
@@ -16,10 +20,4 @@
     </div>
     <button type="submit" class="btn btn-primary">Войти</button>
   </form>
-  <p class="auth-links">
-    <a href="/forgot-password">Забыли пароль?</a>
-    {% if can_register_admin %}
-    <a href="/setup">Зарегистрировать администратора</a>
-    {% endif %}
-  </p>
 {% endblock %}

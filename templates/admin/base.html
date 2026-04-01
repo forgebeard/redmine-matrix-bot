@@ -33,7 +33,7 @@
       <a class="nav-link {% if _path.startswith('/users') %}active{% endif %}" href="/users"><i class="fa-solid fa-users"></i><span>Пользователи</span></a>
       <a class="nav-link {% if _path.startswith('/routes') %}active{% endif %}" href="/routes/status"><i class="fa-solid fa-route"></i><span>Маршруты</span></a>
       <a class="nav-link {% if _path.startswith('/onboarding') or _path.startswith('/secrets') %}active{% endif %}" href="/onboarding"><i class="fa-solid fa-plug"></i><span>Интеграции</span></a>
-      <a class="nav-link {% if _path.startswith('/me/settings') or _path.startswith('/matrix/bind') or _path.startswith('/app-users') %}active{% endif %}" href="/me/settings"><i class="fa-solid fa-gear"></i><span>Настройки</span></a>
+      <a class="nav-link {% if _path.startswith('/me/settings') or _path.startswith('/matrix/bind') %}active{% endif %}" href="/me/settings"><i class="fa-solid fa-gear"></i><span>Настройки</span></a>
     </nav>
   </aside>
 
@@ -63,15 +63,12 @@
         <div class="user-trigger" id="user-trigger" role="button" tabindex="0" aria-haspopup="true" aria-expanded="false" aria-controls="user-dropdown">
           <div class="user-meta">
             <div class="name">{% if _current_user.role == 'admin' %}Администратор{% else %}Пользователь{% endif %}</div>
-            <div class="email" title="{{ _current_user.email }}">{{ _current_user.email }}</div>
+            <div class="email" title="{{ _current_user.login }}">{{ _current_user.login }}</div>
           </div>
-          <div class="avatar" aria-hidden="true">{{ (_current_user.email[:1] or '?')|upper }}</div>
+          <div class="avatar" aria-hidden="true">{{ (_current_user.login[:1] if _current_user.login else '?')|upper }}</div>
         </div>
         <div class="dropdown" id="user-dropdown" role="menu">
           <a href="/me/settings" role="menuitem"><i class="fa-solid fa-sliders"></i> Мои настройки</a>
-          {% if _current_user.role == 'admin' %}
-          <a href="/app-users" role="menuitem"><i class="fa-solid fa-user-shield"></i> Аккаунты панели</a>
-          {% endif %}
           <hr/>
           <a href="/logout" role="menuitem"><i class="fa-solid fa-right-from-bracket"></i> Выход</a>
         </div>

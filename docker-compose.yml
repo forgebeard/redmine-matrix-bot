@@ -1,43 +1,65 @@
 # =============================================================================
-# Оркестрация: бот + PostgreSQL + постоянные тома.
+# Оркестрация: бот + PostgreSQL + админка.
 #
-# Postgres используется для хранения конфигурации и state бота.
+# Пароль суперпользователя Postgres не хранится в репозитории: при первом запуске
+# одноразовый контейнер кладёт его в том ``postgres_password_vol``, тот же файл
+# читают postgres, bot и admin (см. DATABASE_PASSWORD_FILE).
 #
-# Конфигурация читается из Postgres (таблицы `bot_users` и маппинги роутинга).
-#
-# Запуск (из корня репозитория, после копирования и заполнения .env):
+# Запуск из корня репозитория:
 #   docker compose up --build -d
+#
+# Опционально: файл .env (не обязателен) — см. .env.example для ADMIN_PORT и т.д.
 # =============================================================================
 
 services:
   # ---------------------------------------------------------------------------
-  # PostgreSQL — данные на именованном томе (переживает пересоздание контейнера).
+  # Одноразовая генерация пароля БД в именованном томе (идемпотентно).
+  # ---------------------------------------------------------------------------
+  postgres-password-init:
+    image: alpine:3.19
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        apk add --no-cache openssl >/dev/null
+        mkdir -p /out
+        if [ ! -s /out/postgres_password ]; then
+          openssl rand -hex 24 > /out/postgres_password
+        fi
+        # 700 на каталоге ломает чтение для user bot (uid 1000) в admin/bot.
+        chmod 755 /out
+        chmod 444 /out/postgres_password
+    volumes:
+      - postgres_password_vol:/out
+
+  # ---------------------------------------------------------------------------
+  # PostgreSQL — данные на именованном томе.
   # ---------------------------------------------------------------------------
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
+    depends_on:
+      postgres-password-init:
+        condition: service_completed_successfully
     environment:
-      # Значения по умолчанию можно переопределить в .env рядом с compose-файлом.
       POSTGRES_USER: ${POSTGRES_USER:-bot}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: ${POSTGRES_DB:-redmine_matrix}
+      POSTGRES_PASSWORD_FILE: /run/db_password/postgres_password
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - postgres_password_vol:/run/db_password:ro
     healthcheck:
-      # Ждём готовности перед стартом бота (depends_on: condition).
-      # $$ → один $ в shell контейнера (иначе compose подставит хостовые переменные).
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 5s
       timeout: 5s
       retries: 10
       start_period: 10s
-    # Порт наружу не пробрасываем по умолчанию (БД только для сети compose).
-    # Для отладки с хоста публикуем только на localhost (DBeaver на ноуте).
     ports:
       - "127.0.0.1:5433:5432"
 
   # ---------------------------------------------------------------------------
-  # Бот: собирается из Dockerfile в этом репозитории.
+  # Бот
   # ---------------------------------------------------------------------------
   bot:
     build:
@@ -48,21 +70,19 @@ services:
       postgres:
         condition: service_healthy
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
-      # Важно: пароль может содержать зарезервированные URL-символы (например `]`, `/`, `+`),
-      # поэтому используем URL-encoded версию, чтобы asyncpg/SQLAlchemy корректно распарсили DSN.
-      # Если POSTGRES_PASSWORD_URLENC не задан — откат на raw.
-      DATABASE_URL: postgresql://${POSTGRES_USER:-bot}:${POSTGRES_PASSWORD_URLENC:-${POSTGRES_PASSWORD}}@postgres:5432/${POSTGRES_DB:-redmine_matrix}
-      # В clean-code режиме бот всегда читает конфиг и state из Postgres.
+      DATABASE_PASSWORD_FILE: /run/db_password/postgres_password
+      POSTGRES_USER: ${POSTGRES_USER:-bot}
+      POSTGRES_DB: ${POSTGRES_DB:-redmine_matrix}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
     volumes:
-      # Логи bot.log (см. bot.py: data_dir) — переживают обновления образа.
       - ./data:/app/data
-      # Явная подстановка .env в рабочий каталог для python-dotenv (load_dotenv).
-      - ./.env:/app/.env:ro
+      - postgres_password_vol:/run/db_password:ro
     working_dir: /app
     healthcheck:
-      # Отдельный процесс импортирует bot — проверка целостности образа и зависимостей.
       test: ["CMD", "python", "-c", "import bot"]
       interval: 30s
       timeout: 15s
@@ -70,8 +90,7 @@ services:
       start_period: 45s
 
   # ---------------------------------------------------------------------------
-  # Ограниченный прокси к Docker API для admin runtime-control.
-  # Не даём админке прямой доступ к raw docker.sock.
+  # Прокси к Docker API для admin runtime-control.
   # ---------------------------------------------------------------------------
   docker-socket-proxy:
     image: tecnativa/docker-socket-proxy:latest
@@ -93,7 +112,7 @@ services:
       SYSTEM: 0
 
   # ---------------------------------------------------------------------------
-  # Админка (FastAPI): таблицы bot_users, маршруты; миграции Alembic при старте.
+  # Админка: миграции при старте, затем uvicorn.
   # ---------------------------------------------------------------------------
   admin:
     build:
@@ -106,29 +125,29 @@ services:
       docker-socket-proxy:
         condition: service_started
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
-      # См. комментарий выше про URL-encoded пароль.
-      DATABASE_URL: postgresql://${POSTGRES_USER:-bot}:${POSTGRES_PASSWORD_URLENC:-${POSTGRES_PASSWORD}}@postgres:5432/${POSTGRES_DB:-redmine_matrix}
+      DATABASE_PASSWORD_FILE: /run/db_password/postgres_password
+      POSTGRES_USER: ${POSTGRES_USER:-bot}
+      POSTGRES_DB: ${POSTGRES_DB:-redmine_matrix}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
       APP_MASTER_KEY_FILE: ${APP_MASTER_KEY_FILE:-/run/secrets/app_master_key}
       DOCKER_HOST: ${DOCKER_HOST:-tcp://docker-socket-proxy:2375}
       DOCKER_TARGET_SERVICE: ${DOCKER_TARGET_SERVICE:-bot}
       BOT_RUNTIME_STATUS_FILE: ${BOT_RUNTIME_STATUS_FILE:-/app/data/runtime_status.json}
-    command:
-      [
-        "sh",
-        "-c",
-        "alembic upgrade head && exec uvicorn admin_main:app --host 0.0.0.0 --port 8080",
-      ]
+    command: ["/app/scripts/docker_admin_entry.sh"]
     ports:
       - "${ADMIN_PORT:-8080}:8080"
-    # Для production предпочтительно передавать ключ через secret manager
-    # (Docker/K8s secrets) или env APP_MASTER_KEY, а не через bind-файл.
     working_dir: /app
     user: bot
     volumes:
-      - ./data:/app/data:ro
+      - ./data:/app/data
+      - postgres_password_vol:/run/db_password:ro
 
 volumes:
   postgres_data:
+    driver: local
+  postgres_password_vol:
     driver: local

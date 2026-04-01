@@ -13,6 +13,7 @@ sys.path.insert(0, str(_ROOT / "src"))
 
 from database.models import Base  # noqa: E402
 from database.session import sync_database_url_for_alembic  # noqa: E402
+from database.url_resolver import materialize_database_url_env  # noqa: E402
 
 config = context.config
 if config.config_file_name is not None:
@@ -22,6 +23,7 @@ target_metadata = Base.metadata
 
 
 def get_url() -> str:
+    materialize_database_url_env()
     url = os.environ.get("DATABASE_URL", "")
     if not url:
         return config.get_main_option("sqlalchemy.url", "")

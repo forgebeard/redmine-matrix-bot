@@ -1,8 +1,8 @@
 """
 Браузерные смоук-тесты админки (Playwright).
 
-Без E2E_ADMIN_* полный вход выполняется только если в БД ещё нет администратора
-(фикстура пытается один раз пройти /setup).
+Без E2E_ADMIN_* фикстура один раз выполняет вход admin/admin и смену учётки на e2e_admin
+(нужны миграции и зашитый в миграции первый админ).
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from playwright.sync_api import Page, expect
 def test_login_page_visible(page: Page, e2e_admin_url: str) -> None:
     page.goto(f"{e2e_admin_url}/login")
     expect(page.get_by_role("heading", name="Вход в панель")).to_be_visible()
-    expect(page.get_by_label("Email")).to_be_visible()
+    expect(page.get_by_label("Логин")).to_be_visible()
     expect(page.get_by_label("Пароль", exact=True)).to_be_visible()
 
 
@@ -35,12 +35,12 @@ def test_login_reaches_shell_after_auth(
 ) -> None:
     if e2e_credentials is None:
         pytest.skip(
-            "Нет учётных данных: задайте E2E_ADMIN_EMAIL и E2E_ADMIN_PASSWORD "
-            "или очистите таблицу админов для одноразового /setup"
+            "Нет учётных данных: задайте E2E_ADMIN_LOGIN и E2E_ADMIN_PASSWORD "
+            "или убедитесь, что миграции создали admin/admin и HTTP-bootstrap доступен"
         )
-    email, password = e2e_credentials
+    login, password = e2e_credentials
     page.goto(f"{e2e_admin_url}/login")
-    page.get_by_label("Email").fill(email)
+    page.get_by_label("Логин").fill(login)
     page.get_by_label("Пароль", exact=True).fill(password)
     page.get_by_role("button", name="Войти").click()
     # После входа — дашборд или мастер интеграций
@@ -58,9 +58,9 @@ def test_groups_page_visible_after_auth(
 ) -> None:
     if e2e_credentials is None:
         pytest.skip("Нет учётных данных для входа")
-    email, password = e2e_credentials
+    login, password = e2e_credentials
     page.goto(f"{e2e_admin_url}/login")
-    page.get_by_label("Email").fill(email)
+    page.get_by_label("Логин").fill(login)
     page.get_by_label("Пароль", exact=True).fill(password)
     page.get_by_role("button", name="Войти").click()
     page.goto(f"{e2e_admin_url}/groups")

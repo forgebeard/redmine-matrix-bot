@@ -37,9 +37,8 @@ def test_login_page_ok(client: TestClient):
     r = client.get("/login")
     assert r.status_code == 200
     assert "Вход в панель" in r.text
-    assert "Email" in r.text
+    assert "Логин" in r.text
     assert "Пароль" in r.text
-    assert "Забыли пароль?" in r.text
     assert "/static/admin/css/auth.css?v=" in r.text
 
 
@@ -70,38 +69,25 @@ def test_admin_csp_value_env(monkeypatch):
 
 
 def test_notify_presets_helpers():
-    assert admin_main._normalize_notify([]) == ["all"]
-    assert admin_main._normalize_notify(["new", "issue_updated"]) == ["new", "issue_updated"]
-    assert admin_main._normalize_notify(["all", "new"]) == ["all"]
-    assert admin_main._notify_preset(["all"]) == "all"
-    assert admin_main._notify_preset(["new"]) == "new_only"
-    assert admin_main._notify_preset(["overdue"]) == "overdue_only"
-    assert admin_main._notify_preset(["new", "issue_updated"]) == "custom"
+    from admin.notify_prefs import normalize_notify, notify_preset, parse_work_hours_range
+
+    assert normalize_notify([]) == ["all"]
+    assert normalize_notify(["new", "issue_updated"]) == ["new", "issue_updated"]
+    assert normalize_notify(["all", "new"]) == ["all"]
+    assert notify_preset(["all"]) == "all"
+    assert notify_preset(["new"]) == "new_only"
+    assert notify_preset(["overdue"]) == "overdue_only"
+    assert notify_preset(["new", "issue_updated"]) == "custom"
+
+    assert parse_work_hours_range("09:00-18:00") == ("09:00", "18:00")
+    assert parse_work_hours_range("") == ("", "")
+    assert parse_work_hours_range("invalid") == ("", "")
 
 
-def test_work_hours_range_parser():
-    assert admin_main._parse_work_hours_range("09:00-18:00") == ("09:00", "18:00")
-    assert admin_main._parse_work_hours_range("") == ("", "")
-    assert admin_main._parse_work_hours_range("invalid") == ("", "")
-
-
-def test_setup_creates_first_admin(client: TestClient):
-    db_url = os.getenv("DATABASE_URL", "")
-    if not db_url or not db_url.startswith("postgresql://"):
-        pytest.skip("Тест требует Postgres (DATABASE_URL)")
-    page = client.get("/setup")
-    assert page.status_code == 200
-    token = page.cookies.get("admin_csrf")
-    r = client.post(
-        "/setup",
-        data={
-            "email": "first_admin@example.com",
-            "password": "StrongPassword123",
-            "csrf_token": token,
-        },
-        follow_redirects=False,
-    )
+def test_setup_redirects_to_login(client: TestClient):
+    r = client.get("/setup", follow_redirects=False)
     assert r.status_code in (302, 303)
+    assert r.headers.get("location", "").endswith("/login")
 
 
 def test_users_redirects_to_login_without_auth(client: TestClient):
@@ -110,21 +96,10 @@ def test_users_redirects_to_login_without_auth(client: TestClient):
     assert r.headers.get("location", "").endswith("/login")
 
 
-def _setup_and_login_admin(client: TestClient, email: str = "test_admin@example.com", password: str = "StrongPassword123") -> None:
-    setup = client.get("/setup")
-    token = setup.cookies.get("admin_csrf")
-    client.post(
-        "/setup",
-        data={"email": email, "password": password, "csrf_token": token},
-        follow_redirects=False,
-    )
-    login = client.get("/login")
-    ltoken = login.cookies.get("admin_csrf")
-    client.post(
-        "/login",
-        data={"email": email, "password": password, "csrf_token": ltoken},
-        follow_redirects=True,
-    )
+def _setup_and_login_admin(client: TestClient, login: str = "test_admin", password: str = "StrongPassword123") -> None:
+    from tests.support_admin import ensure_admin_logged_in
+
+    ensure_admin_logged_in(client, final_login=login, final_password=password)
 
 
 def test_onboarding_page_copy(client: TestClient):
@@ -155,9 +130,11 @@ def test_ops_restart_accepts_and_redirects(client: TestClient, monkeypatch):
     db_url = os.getenv("DATABASE_URL", "")
     if not db_url or not db_url.startswith("postgresql://"):
         pytest.skip("Тест требует Postgres (DATABASE_URL)")
-    _setup_and_login_admin(client, email="ops_admin@example.com")
+    _setup_and_login_admin(client)
 
-    monkeypatch.setattr(admin_main, "_restart_in_background", lambda actor: None)
+    from admin.routers import ops as admin_ops
+
+    monkeypatch.setattr(admin_ops, "restart_in_background", lambda actor: None)
     page = client.get("/")
     token = page.cookies.get("admin_csrf")
     r = client.post("/ops/bot/restart", data={"csrf_token": token}, follow_redirects=False)

@@ -50,6 +50,7 @@ curl -sS http://localhost:8080/health/smtp
 ## 6) Восстановление админ-доступа при аварии
 
 ```bash
-python scripts/reset_admin_password.py --email admin@example.com --password 'NewStrongPassword123'
+python scripts/manage_admin_credentials.py reset-password --login admin --password 'NewStrongPassword123'
+# или: python scripts/reset_admin_password.py --login admin --password '...'  (совместимость)
 ```
 

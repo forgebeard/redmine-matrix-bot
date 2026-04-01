@@ -14,7 +14,7 @@
 | PostgreSQL (Docker) | Сервис в **`docker-compose.yml`**; конфиг пользователей/маршрутов и **state** — в Postgres через **админку** |
 | `src/preferences.py` (DND / рабочие часы) | **`can_notify()`** вызывается из **`send_safe`** и для утреннего отчёта: поля в объекте пользователя в памяти (загружаются из Postgres); приоритет «Аварийный» пробивает ограничения |
 
-Разделы ниже про **`config.yaml`**, **91 тест** и пути вроде `data/` относятся к целевой/альтернативной схеме и постепенно приводятся к виду выше.
+Файл **`config.yaml`** в текущей схеме **не используется** (пользователи, маршруты и state — в Postgres). Каталог **`data/`** — логи и локальные артефакты; актуальное число тестов см. `pytest tests/ --collect-only` (порядка **200+**).
 
 ---
 
@@ -30,7 +30,7 @@
 | 6 | **Информация предоставлена** | Уведомление при переходе в этот статус |
 | 7 | **Маршрутизация** | Разные статусы / версии / команды → разные комнаты Matrix |
 | 8 | **Мультипользовательность** | Поддержка нескольких пользователей с индивидуальными настройками |
-| 9 | **Рабочие часы и DND** | Заложено в `src/preferences.py`; **подключение к `bot.py` — в планах** |
+| 9 | **Рабочие часы и DND** | `src/preferences.py`, **`can_notify()`** уже вызывается из `bot.py` при отправке и в утреннем отчёте |
 
 ---
 
@@ -55,9 +55,14 @@
 ```
 ┌──────────┐                     ┌─────────────┐
 │  bot     │ ─── DATABASE_URL ─► │ PostgreSQL  │
-│  (контейнер)                  │  (volume)   │    bot_issue_state + lease
-└──────────┘                     └─────────────┘
-       │ (только данные/логи)
+│(контейнер)│                     │  (volume)   │  bot_users, routes, bot_issue_state,
+└──────────┘                     │             │  bot_user_leases, сессии админки, …
+       │                           └──────▲──────┘
+       │ (данные/логи)                  │
+┌──────────┐                            │
+│  admin   │ ─── DATABASE_URL ──────────┘
+│(uvicorn) │   миграции Alembic при старте
+└──────────┘
 ```
 
 **Цикл работы:**
@@ -78,10 +83,10 @@
 | Redmine API | `python-redmine` | Получение задач, журналов, статусов |
 | Планировщик | `APScheduler` | Периодические проверки |
 | Конфигурация | `python-dotenv` | Секреты из `.env` |
-| Тестирование | `pytest` + `pytest-asyncio` | ~190+ тестов (`tests/`) |
+| Тестирование | `pytest` + `pytest-asyncio` | 200+ тестов в `tests/` (юнит/API + e2e Playwright в `tests/e2e/`) |
 | Прод-запуск | Docker Compose | Том `./data`, логи: `docker compose logs -f bot` |
 | Контейнеризация | Dockerfile + Compose | См. раздел «Docker / Production запуск» |
-| БД (резерв) | PostgreSQL 16 | В compose; приложение пока не использует |
+| БД | PostgreSQL 16 | Основное хранилище: конфиг бота, state дедупликации, пользователи и сессии **admin** |
 
 ---
 
@@ -90,8 +95,12 @@
 ```
 matrix_bot_firebeard/
 ├── bot.py                 # Точка входа: Redmine + Matrix + APScheduler
+├── admin_main.py          # Точка входа админки: FastAPI + HTMX (порт `ADMIN_PORT`, см. compose)
 ├── Dockerfile             # Многоступенчатая сборка образа бота (Python 3.11)
-├── docker-compose.yml     # Сервисы: bot + postgres + тома
+├── docker-compose.yml     # Сервисы: bot + admin + postgres + тома
+├── alembic/               # Миграции схемы Postgres
+├── templates/admin/       # Jinja2-шаблоны админки
+├── static/admin/          # CSS и статика (`/static/...`)
 ├── .dockerignore          # Исключения из контекста docker build
 ├── data/
 │   ├── bot.log            # Лог (ротация в коде)
@@ -102,6 +111,7 @@ matrix_bot_firebeard/
 ├── .env                   # Секреты — не коммитить
 ├── .cursorrules           # Правила для ассистента в Cursor
 ├── src/                   # Общие модули и задел под рефакторинг
+│   ├── admin/             # Код админки (роутеры, константы, CSP, CSRF — по мере выноса из admin_main)
 │   ├── config.py
 │   ├── utils.py           # в т.ч. safe_html()
 │   ├── matrix_client.py
@@ -126,6 +136,9 @@ matrix_bot_firebeard/
 | `commands.py` | Интерактивные команды бота | — |
 | `onboarding.py` | Регистрация новых пользователей | — |
 | `reports.py` | Генерация отчётов | — |
+| `security.py` | Argon2, AES-GCM для секретов, политика паролей | `test_security_crypto` |
+| `rate_limit.py` | Скользящее окно лимитов для auth-эндпоинтов админки | `test_rate_limit` |
+| `admin/` | Пакет админ-панели: `authz`, `audit`, `cli_admin_credentials`, `constants`, `notify_prefs`, `matrix_tokens`, `csrf`, `csp`, `lifespan`, `templates_env`, `auth_helpers`, `routers/*` (`health`, `auth`, `ops`, `secrets`, `groups`, `users`, `redmine`, `routes_cfg`, `matrix_bind`, `me`, `dashboard`) | `test_admin_main`, `test_admin_csrf`, `test_notify_prefs`, `test_authz` |
 
 ---
 
@@ -173,7 +186,7 @@ cd src && python3 -c "from config import validate_required_env; ok, m = validate
 python -m pytest tests/ -v --tb=short --ignore=tests/e2e
 ```
 
-**E2E (Playwright)** — `tests/e2e/`: поднимают отдельный `uvicorn` и Chromium. Нужны `DATABASE_URL` на Postgres, после установки браузера: `python -m playwright install chromium`. Полный сценарий входа выполняется либо при пустой БД (одноразовая регистрация через `/setup` в фикстуре), либо при заданных **`E2E_ADMIN_EMAIL`** и **`E2E_ADMIN_PASSWORD`** в окружении.
+**E2E (Playwright)** — `tests/e2e/`: поднимают отдельный `uvicorn` и Chromium. Нужны `DATABASE_URL` на Postgres, после установки браузера: `python -m playwright install chromium`. Полный сценарий входа выполняется либо при пустой БД (одноразовая регистрация через `/setup` в фикстуре), либо при заданных **`E2E_ADMIN_LOGIN`** (или устаревший алиас **`E2E_ADMIN_EMAIL`**) и **`E2E_ADMIN_PASSWORD`** в окружении.
 
 ```bash
 python -m pytest tests/e2e/ -v --tb=short
@@ -199,24 +212,22 @@ python3 bot.py
 
 | Сервис | Назначение |
 |--------|------------|
-| **bot** | Образ из `Dockerfile` (корневой `bot.py` + `src/`), том `./data` → `/app/data`, `.env` только для чтения; healthcheck: `python -c "import bot"` |
-| **postgres** | PostgreSQL 16, том `postgres_data`; `DATABASE_URL` в **bot** и **admin** |
-| **docker-socket-proxy** | Ограниченный прокси к Docker API для runtime-control из admin (без прямого монтирования raw socket в admin) |
-| **admin** | Веб-интерфейс (`admin_main.py`, FastAPI + Jinja2 + HTMX): шаблоны в `templates/admin/`, стили в `static/admin/css/` (раздача `/static/...`); ссылки на CSS с `?v=…` из **`ADMIN_ASSET_VERSION`** (по умолчанию `1`) для сброса кэша после обновления стилей; runtime-control (`start/stop/restart` сервиса `bot`) через `DOCKER_HOST` + `DOCKER_TARGET_SERVICE`; опционально **CSP** через `ADMIN_ENABLE_CSP` / `ADMIN_CSP_POLICY` в `.env`. Порт: **`ADMIN_PORT`** (по умолчанию 8080); при старте `alembic upgrade head` |
+| **postgres-password-init** | Одноразовый контейнер: случайный пароль Postgres в томе `postgres_password_vol` (в git паролей нет). Каталог в томе — `0755`, файл — `0444`, чтобы процессы под пользователем `bot` (uid 1000) могли читать пароль. |
+| **bot** | Образ `Dockerfile`, том `./data`; DSN из `DATABASE_PASSWORD_FILE` + `POSTGRES_*`. Healthcheck: `python -c "import bot"`. |
+| **postgres** | PostgreSQL 16, том `postgres_data`; пароль из файла `POSTGRES_PASSWORD_FILE`. |
+| **docker-socket-proxy** | Прокси к Docker API для runtime-control из admin. |
+| **admin** | Веб-интерфейс; `./data` смонтирован на **запись** (логи, авто `data/.app_master_key`). Старт: `scripts/docker_admin_entry.sh` → `alembic upgrade head` → uvicorn. Порт **`ADMIN_PORT`**. |
 
-### Подготовка `.env`
+### Секреты и `.env` при Docker
 
-Сначала добавьте переменные для PostgreSQL (используются и `docker compose`, и подстановка `DATABASE_URL` в контейнере бота):
+1. **Пароль Postgres** создаётся при первом `docker compose up` и лежит только в томе. Для DBeaver / строки Alembic с хоста: админка → **«Пароль PostgreSQL»** на обзоре (`/ops/postgres-connection`).
+2. **Master key** шифрования секретов в БД: если не задан `APP_MASTER_KEY`, создаётся `data/.app_master_key` (в `.gitignore`). Каталог `data/` общий для **admin** и **bot**.
+3. **Matrix / Redmine** — в первую очередь через **онбординг** и страницу **«Секреты»**; переменные в `.env` — опциональный fallback (CI, отладка).
+4. **`.env` не обязателен** для старта compose (`env_file: required: false`). При необходимости: `cp .env.example .env` — порт админки, SMTP и т.д.
 
-```env
-POSTGRES_USER=bot
-POSTGRES_PASSWORD=сгенерируйте_надёжный_пароль
-POSTGRES_DB=redmine_matrix
-```
+Для **pytest** по умолчанию подставляется тестовый `DATABASE_URL` (как в CI). Чтобы использовать свой `.env` при тестах: `TEST_USE_LOCAL_ENV=1 pytest …`.
 
-Остальные переменные — как в разделе «Настройка .env» ниже (`MATRIX_*`, `REDMINE_*` и параметры admin).
-
-> ⚠️ Если в пароле есть символы `@ : / ? #` — для `DATABASE_URL` может понадобиться URL-кодирование или упрощённый пароль для dev.
+**Смена пароля админа панели** — `scripts/manage_admin_credentials.py`. **Смена пароля роли Postgres** после инициализации — через `psql` / `ALTER USER` (или новые тома в dev).
 
 ### Сборка и запуск
 
@@ -236,13 +247,17 @@ docker compose logs -f bot
 docker compose down
 ```
 
-Данные **Postgres** сохраняются в томе `postgres_data` (конфиг + `bot_issue_state`/lease). State больше не пишется в JSON.
+Данные **Postgres** — в томе `postgres_data`; файл с паролем суперпользователя — в томе `postgres_password_vol` (не коммитится). State больше не пишется в JSON.
+
+**Если admin/bot падают с `Permission denied` на `/run/db_password/postgres_password`:** выполните `docker compose up -d postgres-password-init` (подправит права на каталог в томе) и пересоздайте контейнеры `admin`/`bot` (`docker compose up -d --force-recreate admin bot`).
+
+**Если после правок тома пароля видите `password authentication failed for user "bot"` при живом `postgres_data`:** пароль в файле и в уже инициализированном кластере разошлись. В dev проще снести том `postgres_data` и поднять заново; либо синхронизируйте пароль роли с содержимым файла (из контейнера `postgres`: прочитать `/run/db_password/postgres_password` и выполнить `ALTER USER … PASSWORD`).
 
 ### Админка и конфиг в БД
 
-1. После `docker compose up` откройте `http://<хост>:8080/setup` и создайте первого admin (только если admin ещё нет в БД).
-2. Вход в админку: `http://<хост>:8080/login` по `email + password`.
-3. Восстановление пароля: `http://<хост>:8080/forgot-password` → одноразовый reset token.
+1. После `docker compose up` и миграций первый администратор создаётся автоматически: логин **`admin`**, пароль **`admin`**. Откройте `http://<хост>:8080/login`, войдите и **сразу смените логин и пароль** (без этого недоступны онбординг Redmine/Matrix и остальная панель).
+2. Дальнейший вход — по вашему новому логину и паролю.
+3. Смена пароля или логина позже — через CLI: `scripts/manage_admin_credentials.py` (см. раздел Recovery ниже).
 4. Заполните пользователей, маршруты и секреты в админке; затем перезапустите сервис **`bot`** (бот читает конфиг при старте).
 5. Для дедупликации на нескольких инстансах используется lease по пользователю (`bot_user_leases`) и state в `bot_issue_state`.
 
@@ -263,16 +278,18 @@ docker compose up -d bot
 
 ---
 
-## Настройка .env
+## Настройка интеграций (UI в приоритете)
+
+В Docker-режиме **Matrix и Redmine** задаются в админке (онбординг / «Секреты») и хранятся в БД зашифрованными. Блок ниже — справка для **опционального** `.env` (локальная отладка, CI):
 
 ```env
-# ─── Matrix-сервер ───────────────────────────────────
+# ─── Matrix (fallback) ─────────────────────────────
 MATRIX_HOMESERVER=https://messenger.example.com
 MATRIX_ACCESS_TOKEN=syt_your_access_token_here
 MATRIX_USER_ID=@bot_user:messenger.example.com
 MATRIX_DEVICE_ID=BOTDEVICE
 
-# ─── Redmine ─────────────────────────────────────────
+# ─── Redmine (fallback) ─────────────────────────────
 REDMINE_URL=https://redmine.example.com
 REDMINE_API_KEY=your_redmine_api_key
 ```
@@ -302,15 +319,14 @@ REDMINE_API_KEY=your_redmine_api_key
 
 | Переменная | Назначение |
 |------------|------------|
-| `AUTH_TOKEN_SALT` | Соль для hash reset-токенов |
+| `AUTH_TOKEN_SALT` | Соль для hash одноразового кода привязки Matrix (`/matrix/bind`) |
 | `SESSION_TTL_SECONDS` | Время жизни admin-сессии |
-| `RESET_TOKEN_TTL_SECONDS` | TTL токена сброса пароля |
-| `RESET_COOLDOWN_SECONDS` | Ограничение частоты reset-запросов |
 | `COOKIE_SECURE` | Secure-флаг cookie (`1` для HTTPS) |
 | `APP_MASTER_KEY_FILE` | Путь к master key (32 байта) |
-| `SHOW_DEV_TOKENS` | Показ dev reset-токена в UI (только dev/test) |
 
-### SMTP reset
+Публичные формы (**`/login`**, первичный **`/setup`**) ограничиваются по IP in-memory лимитером (`src/rate_limit.py`, один процесс = одна «корзина»). За несколькими репликами админки без sticky-сессий имеет смысл вынести лимиты на прокси (nginx) или Redis.
+
+### SMTP (опционально, проверка `/health/smtp`)
 
 | Переменная | Назначение |
 |------------|------------|
@@ -318,9 +334,9 @@ REDMINE_API_KEY=your_redmine_api_key
 | `SMTP_PORT` | SMTP порт |
 | `SMTP_USERNAME` | SMTP логин |
 | `SMTP_PASSWORD` | SMTP пароль |
-| `SMTP_SENDER` | Email отправителя |
+| `SMTP_SENDER` | Адрес отправителя (для проверки соединения) |
 | `SMTP_USE_TLS` / `SMTP_USE_STARTTLS` | Режим транспортной защиты |
-| `SMTP_MOCK` | dev/test режим без реальной отправки (в production должен быть `0`) |
+| `SMTP_MOCK` | dev/test режим без реального подключения (в production обычно `0`) |
 | `SMTP_HEALTH_TTL_SECONDS` | TTL кэша проверки SMTP |
 
 ### Health endpoints
@@ -331,10 +347,20 @@ REDMINE_API_KEY=your_redmine_api_key
 
 ### Recovery
 
-Аварийный сброс пароля администратора:
+Смена **пароля** или **логина** администратора (только CLI, с инвалидацией всех сессий):
 
 ```bash
-python scripts/reset_admin_password.py --email admin@example.com --password 'NewStrongPassword123'
+python scripts/manage_admin_credentials.py reset-password --login admin --password 'NewStrongPassword123'
+# или интерактивный ввод пароля:
+python scripts/manage_admin_credentials.py reset-password --login admin
+
+python scripts/manage_admin_credentials.py change-login --old-login admin --new-login superadmin
+```
+
+Совместимость со старым вызовом (аргумент `--email` = логин):
+
+```bash
+python scripts/reset_admin_password.py --login admin --password 'NewStrongPassword123'
 ```
 
 Полный регламент отката: `docs/rollback-runbook.md`.
@@ -559,7 +585,7 @@ python -m pytest tests/ --cov=src --cov-report=term-missing
 |--------|-------|-----------------|
 | Корневой бот | `test_bot.py` | Логика `bot.py`, Matrix-моки, state, журналы |
 | Модули `src/` | `test_config.py`, `test_utils.py`, … | Конфиг, utils, state, preferences, matrix_client |
-| Админка E2E | `tests/e2e/` | Playwright: страница логина, редирект без сессии, вход (при пустой БД или `E2E_ADMIN_*`) |
+| Админка E2E | `tests/e2e/` | Playwright: страница логина, редирект без сессии, вход (при пустой БД или `E2E_ADMIN_LOGIN` / `E2E_ADMIN_PASSWORD`) |
 
 ---
 
@@ -630,7 +656,7 @@ python3 bot.py 2>&1 | head -30
 1. Проверьте `MATRIX_ACCESS_TOKEN` — токен может быть просрочен
 2. Проверьте, что бот присоединён к комнатам Matrix (пригласите его)
 3. Проверьте `REDMINE_API_KEY` — ключ должен иметь доступ к задачам
-4. Проверьте Redmine user ID в `config.yaml` — ID в URL профиля
+4. Проверьте **Redmine user id** у записи пользователя в админке / в таблице `bot_users` — он должен совпадать с ID в URL профиля в Redmine
 5. Посмотрите лог: `tail -50 data/bot.log`
 
 ### Бот спамит старыми уведомлениями после перезапуска

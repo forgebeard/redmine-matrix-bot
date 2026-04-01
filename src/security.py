@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import re
 import secrets
@@ -10,11 +11,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from argon2 import PasswordHasher
-from argon2.exceptions import VerifyMismatchError
+from argon2.exceptions import HashingError, InvalidHashError, VerifyMismatchError
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 
 _PASSWORD_HASHER = PasswordHasher()
+logger = logging.getLogger(__name__)
 
 
 class SecurityError(RuntimeError):
@@ -30,7 +32,14 @@ def verify_password(password_hash: str, password: str) -> bool:
         return _PASSWORD_HASHER.verify(password_hash, password)
     except VerifyMismatchError:
         return False
-    except Exception:
+    except InvalidHashError:
+        logger.warning("password verify: stored hash is invalid or corrupted")
+        return False
+    except HashingError as e:
+        logger.warning("password verify: hashing error (%s): %s", type(e).__name__, e)
+        return False
+    except Exception as e:
+        logger.warning("password verify: unexpected error (%s): %s", type(e).__name__, e)
         return False
 
 
@@ -47,14 +56,15 @@ _COMMON_WEAK_PASSWORDS = {
 }
 
 
-def validate_password_policy(password: str, email: str = "") -> tuple[bool, str | None]:
-    """Returns (ok, reason)."""
+def validate_password_policy(password: str, login: str = "") -> tuple[bool, str | None]:
+    """Returns (ok, reason). login — нормализованный логин админа (без пробелов, lower)."""
     if len(password or "") < 12:
         return False, "Пароль должен содержать минимум 12 символов"
     if password.lower() in _COMMON_WEAK_PASSWORDS:
         return False, "Пароль слишком простой"
-    if email and email.lower() in password.lower():
-        return False, "Пароль не должен содержать email"
+    lo = (login or "").strip().lower()
+    if lo and len(lo) >= 3 and lo in password.lower():
+        return False, "Пароль не должен содержать логин"
     if not re.search(r"[A-Za-zА-Яа-я]", password):
         return False, "Пароль должен содержать буквы"
     if not re.search(r"\d", password):
@@ -70,10 +80,18 @@ def make_reset_token() -> str:
     return secrets.token_urlsafe(32)
 
 
+def _default_auto_master_key_path() -> Path:
+    custom = (os.getenv("AUTO_MASTER_KEY_FILE") or "").strip()
+    if custom:
+        return Path(custom)
+    root = Path(__file__).resolve().parent.parent
+    return root / "data" / ".app_master_key"
+
+
 def load_master_key() -> bytes:
     """
-    Load 32-byte key from Docker secret file.
-    In tests/dev can fallback to APP_MASTER_KEY env.
+    Ключ 32 байта (UTF-8): файл ``APP_MASTER_KEY_FILE``, затем ``APP_MASTER_KEY``,
+    затем автоматический файл ``data/.app_master_key`` (создаётся при первом запуске).
     """
     p = os.getenv("APP_MASTER_KEY_FILE", "/run/secrets/app_master_key")
     fp = Path(p)
@@ -81,10 +99,24 @@ def load_master_key() -> bytes:
     if fp.exists() and fp.is_file():
         raw = fp.read_text(encoding="utf-8").strip()
         key = raw.encode("utf-8")
-    # Fallback for local/dev when file secret is not available or is mis-mounted.
     if not key:
         raw = (os.getenv("APP_MASTER_KEY") or "").strip()
         key = raw.encode("utf-8")
+    if len(key) == 32:
+        return key
+    if key:
+        raise SecurityError("Master key must be exactly 32 bytes")
+    auto_path = _default_auto_master_key_path()
+    auto_path.parent.mkdir(parents=True, exist_ok=True)
+    if not auto_path.exists():
+        auto_path.write_text(secrets.token_hex(16) + "\n", encoding="utf-8")
+        try:
+            auto_path.chmod(0o600)
+        except OSError:
+            pass
+        logger.info("Создан автоматический master key: %s", auto_path)
+    raw_auto = auto_path.read_text(encoding="utf-8").strip()
+    key = raw_auto.encode("utf-8")
     if len(key) != 32:
         raise SecurityError("Master key must be exactly 32 bytes")
     return key

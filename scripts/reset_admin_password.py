@@ -1,53 +1,33 @@
 #!/usr/bin/env python3
-"""Emergency script: reset admin password directly in DB."""
+"""Совместимость: используйте scripts/manage_admin_credentials.py reset-password --login …"""
 
 from __future__ import annotations
 
 import argparse
 import asyncio
-import os
 import sys
+from pathlib import Path
 
-ROOT = os.path.dirname(os.path.dirname(__file__))
-sys.path.insert(0, os.path.join(ROOT, "src"))
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "src"))
 
-from sqlalchemy import delete, select
-
-from database.models import BotAppUser, BotSession
-from database.session import get_session_factory
-from security import hash_password, validate_password_policy
+from admin.cli_admin_credentials import async_reset_password  # noqa: E402
 
 
-async def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--email", required=True, help="Admin email")
-    parser.add_argument("--password", required=True, help="New password")
+async def _main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Сброс пароля админа (предпочтительно: manage_admin_credentials.py)",
+    )
+    parser.add_argument("--email", default="", help="Устарело: то же, что --login")
+    parser.add_argument("--login", default="", help="Логин администратора (предпочтительно)")
+    parser.add_argument("--password", required=True, help="Новый пароль")
     args = parser.parse_args()
-
-    email = args.email.strip().lower()
-    password = args.password
-    ok, reason = validate_password_policy(password, email=email)
-    if not ok:
-        print(f"Password policy failed: {reason}", file=sys.stderr)
-        return 2
-
-    factory = get_session_factory()
-    async with factory() as session:
-        r = await session.execute(select(BotAppUser).where(BotAppUser.email == email))
-        user = r.scalar_one_or_none()
-        if not user:
-            print("User not found", file=sys.stderr)
-            return 3
-        if user.role != "admin":
-            print("User exists but is not admin", file=sys.stderr)
-            return 4
-        user.password_hash = hash_password(password)
-        user.session_version = (user.session_version or 1) + 1
-        await session.execute(delete(BotSession).where(BotSession.user_id == user.id))
-        await session.commit()
-    print("Admin password reset completed.")
-    return 0
+    login = (args.login or args.email or "").strip()
+    if not login:
+        print("Укажите --login или устаревший --email", file=sys.stderr)
+        return 1
+    return await async_reset_password(login, args.password, force=True)
 
 
 if __name__ == "__main__":
-    raise SystemExit(asyncio.run(main()))
+    raise SystemExit(asyncio.run(_main()))

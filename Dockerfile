@@ -36,7 +36,8 @@ FROM python:3.11-slim-bookworm AS runtime
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PATH="/opt/venv/bin:$PATH"
+    PATH="/opt/venv/bin:$PATH" \
+    PYTHONPATH=/app/src
 
 # Непривилегированный пользователь: процесс в контейнере не root (best practice).
 RUN groupadd --system --gid 1000 bot && \
@@ -56,6 +57,8 @@ COPY --chown=bot:bot static/ ./static/
 COPY --chown=bot:bot scripts/ ./scripts/
 COPY --chown=bot:bot alembic.ini .
 COPY --chown=bot:bot alembic/ ./alembic/
+
+RUN chmod +x /app/scripts/docker_admin_entry.sh
 
 # /app должен принадлежать bot: иначе не создать data/bot.log на томе при первом запуске
 # и нет прав на запись в каталог приложения.

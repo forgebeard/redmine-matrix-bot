@@ -1,4 +1,4 @@
-"""SMTP sender and health checks for admin password reset flow."""
+"""SMTP health checks (опционально). Веб-сброс пароля отключён — см. scripts/manage_admin_credentials.py."""
 
 from __future__ import annotations
 
@@ -6,7 +6,6 @@ import smtplib
 import ssl
 import time
 from dataclasses import dataclass
-from email.message import EmailMessage
 import os
 
 
@@ -84,38 +83,24 @@ def check_smtp_health(force: bool = False) -> SmtpHealth:
     return _SMTP_HEALTH_CACHE
 
 
-def send_reset_email(to_email: str, reset_url: str) -> tuple[bool, str]:
-    settings = load_smtp_settings()
-    if settings.mock_mode:
-        return True, "mock"
-    if not settings.host or not settings.sender:
-        return False, "smtp not configured"
-    try:
-        msg = EmailMessage()
-        msg["Subject"] = "Сброс пароля админ-панели"
-        msg["From"] = settings.sender
-        msg["To"] = to_email
-        msg.set_content(
-            "Вы запросили сброс пароля.\n"
-            f"Перейдите по ссылке: {reset_url}\n"
-            "Если это были не вы, проигнорируйте письмо."
-        )
-        client = _smtp_connect(settings)
-        client.send_message(msg)
-        client.quit()
-        return True, "sent"
-    except Exception as e:
-        return False, f"send failed: {type(e).__name__}"
+def mask_login(value: str) -> str:
+    """Маскирование логина (или legacy email-логина) для логов."""
+    s = (value or "").strip()
+    if not s:
+        return "***"
+    if "@" in s:
+        local, domain = s.split("@", 1)
+        if len(local) <= 2:
+            local_masked = local[:1] + "***"
+        else:
+            local_masked = local[:2] + "***"
+        return f"{local_masked}@{domain}"
+    if len(s) <= 2:
+        return s[:1] + "***"
+    return s[:2] + "***"
 
 
 def mask_email(email: str) -> str:
-    email = (email or "").strip()
-    if "@" not in email:
-        return "***"
-    local, domain = email.split("@", 1)
-    if len(local) <= 2:
-        local_masked = local[:1] + "***"
-    else:
-        local_masked = local[:2] + "***"
-    return f"{local_masked}@{domain}"
+    """Алиас для совместимости; предпочтительно mask_login."""
+    return mask_login(email)
 

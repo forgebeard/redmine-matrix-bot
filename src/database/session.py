@@ -8,6 +8,8 @@ from contextlib import asynccontextmanager
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from database.url_resolver import materialize_database_url_env
+
 
 def async_database_url(url: str | None) -> str:
     """postgresql:// → postgresql+asyncpg://"""
@@ -30,6 +32,7 @@ def sync_database_url_for_alembic(url: str) -> str:
 
 
 def make_engine():
+    materialize_database_url_env()
     url = os.getenv("DATABASE_URL", "")
     async_url = async_database_url(url)
     if not async_url:
