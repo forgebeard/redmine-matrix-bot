@@ -2,6 +2,7 @@
 .env
 master_key.txt
 *.key
+data/.app_master_key
 
 # Виртуальное окружение
 venv/
