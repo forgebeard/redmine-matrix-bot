@@ -41,11 +41,8 @@
       <div id="notify_custom_box" class="sub-panel sub-panel--notify">
         <span class="field-hint">Расширенный режим: выберите нужные события.</span>
         <div class="notify-events-grid">
-          {% for key, label in [
-            ("new", "Новая задача"), ("info", "Информация предоставлена"), ("reminder", "Напоминание"),
-            ("overdue", "Просроченная"), ("status_change", "Смена статуса"), ("issue_updated", "Обновление"), ("reopened", "Переоткрыта")
-          ] %}
-            <label class="choice"><input type="checkbox" name="notify_values" value="{{ key }}" {% if key in notify_selected %}checked{% endif %}/> {{ label }}</label>
+          {% for item in notify_catalog %}
+            <label class="choice"><input type="checkbox" name="notify_values" value="{{ item.key }}" {% if item.key in notify_selected %}checked{% endif %}/> {{ item.label }}</label>
           {% endfor %}
         </div>
         <input type="hidden" name="notify_json" value="{{ notify_json }}"/>

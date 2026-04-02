@@ -37,6 +37,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import delete, func, or_, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.models import (
@@ -56,6 +57,7 @@ from database.session import get_session, get_session_factory
 from mail import mask_identifier
 from security import (
     SecurityError,
+    decrypt_secret,
     encrypt_secret,
     hash_password,
     load_master_key,
@@ -260,16 +262,10 @@ ONBOARDING_SKIPPED_SECRET = "__onboarding_skipped"
 def _matrix_bot_mxid() -> str:
     """MXID бота из .env — подсказка в «Мои настройки» (без отдельной страницы привязки)."""
     return (os.getenv("MATRIX_USER_ID") or "").strip()
-NOTIFY_TYPES = [
-    ("new", "Новая задача"),
-    ("info", "Информация предоставлена"),
-    ("reminder", "Напоминание"),
-    ("overdue", "Просроченная задача"),
-    ("status_change", "Изменение статуса"),
-    ("issue_updated", "Обновление задачи"),
-    ("reopened", "Переоткрыта"),
-]
-NOTIFY_TYPE_KEYS = [k for k, _ in NOTIFY_TYPES]
+NOTIFY_TYPES: list[tuple[str, str]] = []
+NOTIFY_TYPE_KEYS: list[str] = []
+CATALOG_NOTIFY_SECRET = "__catalog_notify"
+CATALOG_VERSIONS_SECRET = "__catalog_versions"
 
 ADMIN_BOOTSTRAP_FIRST_ADMIN = (os.getenv("ADMIN_BOOTSTRAP_FIRST_ADMIN", "0").strip().lower() in ("1", "true", "yes", "on"))
 
@@ -422,9 +418,155 @@ def _parse_status_keys_list(raw: str) -> list[str]:
     return out
 
 
+def _parse_json_string_list(raw: str) -> list[str]:
+    raw = (raw or "").strip()
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(data, list):
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in data:
+        value = str(item).strip()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        out.append(value)
+    return out
+
+
+def _default_notify_catalog() -> list[dict[str, str]]:
+    return []
+
+
+def _default_versions_catalog() -> list[str]:
+    return []
+
+
+def _catalog_key_from_label(label: str, used: set[str]) -> str:
+    base = re.sub(r"[^a-z0-9]+", "_", label.lower()).strip("_")
+    if not base:
+        base = "opt"
+    key = base
+    i = 2
+    while key in used:
+        key = f"{base}_{i}"
+        i += 1
+    return key
+
+
+def _normalize_notify_catalog(data) -> list[dict[str, str]]:
+    if not isinstance(data, list):
+        return _default_notify_catalog()
+    out: list[dict[str, str]] = []
+    used: set[str] = set()
+    for item in data:
+        if isinstance(item, dict):
+            label = str(item.get("label") or "").strip()
+            key = str(item.get("key") or "").strip().lower()
+        else:
+            label = str(item).strip()
+            key = ""
+        if not label:
+            continue
+        if not key:
+            key = _catalog_key_from_label(label, used)
+        if key in used:
+            continue
+        used.add(key)
+        out.append({"key": key, "label": label})
+    return out
+
+
+def _normalize_versions_catalog(data) -> list[str]:
+    if not isinstance(data, list):
+        return _default_versions_catalog()
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in data:
+        value = str(item).strip()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        out.append(value)
+    return out
+
+
+async def _load_secret_plain(session: AsyncSession, name: str) -> str:
+    q = await session.execute(select(AppSecret).where(AppSecret.name == name))
+    row = q.scalar_one_or_none()
+    if row is None:
+        return ""
+    key = load_master_key()
+    try:
+        return decrypt_secret(row.ciphertext, row.nonce, key)
+    except SecurityError:
+        logger.warning("secret_decrypt_failed name=%s", name)
+        return ""
+
+
+async def _upsert_secret_plain(session: AsyncSession, name: str, value: str) -> None:
+    key = load_master_key()
+    enc = encrypt_secret(value, key=key)
+    q = await session.execute(select(AppSecret).where(AppSecret.name == name))
+    row = q.scalar_one_or_none()
+    if row is None:
+        session.add(
+            AppSecret(name=name, ciphertext=enc.ciphertext, nonce=enc.nonce, key_version=enc.key_version)
+        )
+        return
+    row.ciphertext = enc.ciphertext
+    row.nonce = enc.nonce
+    row.key_version = enc.key_version
+
+
+async def _load_catalogs(session: AsyncSession) -> tuple[list[dict[str, str]], list[str]]:
+    raw_notify = await _load_secret_plain(session, CATALOG_NOTIFY_SECRET)
+    raw_versions = await _load_secret_plain(session, CATALOG_VERSIONS_SECRET)
+    if raw_notify:
+        try:
+            notify_catalog = _normalize_notify_catalog(json.loads(raw_notify))
+        except json.JSONDecodeError:
+            notify_catalog = _default_notify_catalog()
+    else:
+        notify_catalog = _default_notify_catalog()
+    if raw_versions:
+        try:
+            versions_catalog = _normalize_versions_catalog(json.loads(raw_versions))
+        except json.JSONDecodeError:
+            versions_catalog = _default_versions_catalog()
+    else:
+        versions_catalog = _default_versions_catalog()
+    return notify_catalog, versions_catalog
+
+
+def _parse_catalog_payload(notify_raw: str, versions_raw: str) -> tuple[list[dict[str, str]], list[str]]:
+    if notify_raw:
+        try:
+            notify_catalog = _normalize_notify_catalog(json.loads(notify_raw))
+        except json.JSONDecodeError:
+            notify_catalog = _default_notify_catalog()
+    else:
+        notify_catalog = _default_notify_catalog()
+    if versions_raw:
+        try:
+            versions_catalog = _normalize_versions_catalog(json.loads(versions_raw))
+        except json.JSONDecodeError:
+            versions_catalog = _default_versions_catalog()
+    else:
+        versions_catalog = _default_versions_catalog()
+    return notify_catalog, versions_catalog
+
+
 def _normalized_group_filter_key(name: str) -> str:
     """Нормализация имени для сравнения с подписью фильтра (без дублей «Все группы» в select)."""
-    return unicodedata.normalize("NFKC", name).strip().casefold()
+    normalized = unicodedata.normalize("NFKC", name or "")
+    compact_spaces = " ".join(normalized.replace("\u00a0", " ").split())
+    return compact_spaces.strip().casefold()
 
 
 def _group_excluded_from_assignable_lists(name: str | None) -> bool:
@@ -989,12 +1131,16 @@ async def onboarding_page(request: Request, session: AsyncSession = Depends(get_
     if not user or getattr(user, "role", "") != "admin":
         return RedirectResponse("/login", status_code=303)
     csrf_token, set_cookie = _ensure_csrf(request)
+    notify_catalog, versions_catalog = await _load_catalogs(session)
     resp = templates.TemplateResponse(
         request,
         "onboarding.html",
         {
             "csrf_token": csrf_token,
             "error": None,
+            "saved": (request.query_params.get("saved") or "").strip(),
+            "notify_catalog": notify_catalog,
+            "versions_catalog": versions_catalog,
         },
     )
     if set_cookie:
@@ -1033,7 +1179,28 @@ async def onboarding_save(
     # onboarding is complete once values were submitted; remove skip marker.
     await session.execute(delete(AppSecret).where(AppSecret.name == ONBOARDING_SKIPPED_SECRET))
     _integration_status_cache.invalidate()
-    return RedirectResponse(DASHBOARD_PATH, status_code=303)
+    return RedirectResponse("/onboarding?saved=connections", status_code=303)
+
+
+@app.post("/onboarding/catalog/save")
+async def onboarding_catalog_save(
+    request: Request,
+    catalog_notify_json: Annotated[str, Form()] = "",
+    catalog_versions_json: Annotated[str, Form()] = "",
+    csrf_token: Annotated[str, Form()] = "",
+    session: AsyncSession = Depends(get_session),
+):
+    _verify_csrf(request, csrf_token)
+    user = getattr(request.state, "current_user", None)
+    if not user or getattr(user, "role", "") != "admin":
+        raise HTTPException(403, "Только admin")
+    notify_catalog, versions_catalog = _parse_catalog_payload(
+        (catalog_notify_json or "").strip(),
+        (catalog_versions_json or "").strip(),
+    )
+    await _upsert_secret_plain(session, CATALOG_NOTIFY_SECRET, json.dumps(notify_catalog, ensure_ascii=False))
+    await _upsert_secret_plain(session, CATALOG_VERSIONS_SECRET, json.dumps(versions_catalog, ensure_ascii=False))
+    return JSONResponse({"ok": True, "notify_count": len(notify_catalog), "versions_count": len(versions_catalog)})
 
 
 @app.post("/onboarding/skip")
@@ -1054,6 +1221,103 @@ async def onboarding_skip(
         session.add(AppSecret(name=ONBOARDING_SKIPPED_SECRET, ciphertext=enc.ciphertext, nonce=enc.nonce, key_version=enc.key_version))
     _integration_status_cache.invalidate()
     return RedirectResponse(DASHBOARD_PATH, status_code=303)
+
+
+def _check_redmine_access(url: str, api_key: str) -> tuple[bool, str]:
+    from urllib.error import HTTPError, URLError
+    from urllib.request import Request, urlopen
+
+    base = (url or "").strip().rstrip("/")
+    key = (api_key or "").strip()
+    if not base or not key:
+        return False, "Redmine: укажите URL и API-ключ."
+    req = Request(
+        f"{base}/users/current.json",
+        headers={"X-Redmine-API-Key": key, "Accept": "application/json"},
+    )
+    try:
+        with urlopen(req, timeout=6.0) as resp:
+            payload = json.loads(resp.read().decode("utf-8", errors="replace"))
+        user = payload.get("user") if isinstance(payload, dict) else {}
+        login = str((user or {}).get("login") or "").strip()
+        suffix = f" (user: {login})" if login else ""
+        return True, f"Redmine: подключение успешно{suffix}."
+    except HTTPError as e:
+        return False, f"Redmine: HTTP {e.code}."
+    except URLError:
+        return False, "Redmine: нет ответа (URL/сеть/timeout)."
+    except Exception:
+        return False, "Redmine: ошибка проверки."
+
+
+def _check_matrix_access(homeserver: str, user_id: str, token: str) -> tuple[bool, str]:
+    from urllib.error import HTTPError, URLError
+    from urllib.request import Request, urlopen
+
+    hs = (homeserver or "").strip().rstrip("/")
+    mxid = (user_id or "").strip()
+    access_token = (token or "").strip()
+    if not hs or not mxid or not access_token:
+        return False, "Matrix: укажите homeserver, user id и token."
+    try:
+        # Базовая доступность homeserver.
+        with urlopen(Request(f"{hs}/_matrix/client/versions"), timeout=6.0):
+            pass
+        # Валидность токена.
+        who_req = Request(
+            f"{hs}/_matrix/client/v3/account/whoami",
+            headers={"Authorization": f"Bearer {access_token}", "Accept": "application/json"},
+        )
+        with urlopen(who_req, timeout=6.0) as resp:
+            payload = json.loads(resp.read().decode("utf-8", errors="replace"))
+        got_user = str((payload or {}).get("user_id") or "").strip()
+        if got_user and got_user != mxid:
+            return True, f"Matrix: подключение успешно, но token принадлежит {got_user}."
+        return True, "Matrix: подключение успешно."
+    except HTTPError as e:
+        return False, f"Matrix: HTTP {e.code}."
+    except URLError:
+        return False, "Matrix: нет ответа (URL/сеть/timeout)."
+    except Exception:
+        return False, "Matrix: ошибка проверки."
+
+
+@app.post("/onboarding/check")
+async def onboarding_check(
+    request: Request,
+    secret_REDMINE_URL: Annotated[str, Form()] = "",
+    secret_REDMINE_API_KEY: Annotated[str, Form()] = "",
+    secret_MATRIX_HOMESERVER: Annotated[str, Form()] = "",
+    secret_MATRIX_USER_ID: Annotated[str, Form()] = "",
+    secret_MATRIX_ACCESS_TOKEN: Annotated[str, Form()] = "",
+    csrf_token: Annotated[str, Form()] = "",
+):
+    _verify_csrf(request, csrf_token)
+    user = getattr(request.state, "current_user", None)
+    if not user or getattr(user, "role", "") != "admin":
+        raise HTTPException(403, "Только admin")
+
+    redmine_ok, redmine_msg = await asyncio.to_thread(
+        _check_redmine_access,
+        secret_REDMINE_URL,
+        secret_REDMINE_API_KEY,
+    )
+    matrix_ok, matrix_msg = await asyncio.to_thread(
+        _check_matrix_access,
+        secret_MATRIX_HOMESERVER,
+        secret_MATRIX_USER_ID,
+        secret_MATRIX_ACCESS_TOKEN,
+    )
+    ok = redmine_ok and matrix_ok
+    return JSONResponse(
+        {
+            "ok": ok,
+            "checks": [
+                {"service": "redmine", "ok": redmine_ok, "message": redmine_msg},
+                {"service": "matrix", "ok": matrix_ok, "message": matrix_msg},
+            ],
+        }
+    )
 
 
 @app.get("/forgot-password")
@@ -1571,10 +1835,12 @@ async def groups_list(
 @app.get("/groups/new", response_class=HTMLResponse)
 async def groups_new(
     request: Request,
+    session: AsyncSession = Depends(get_session),
 ):
     user = getattr(request.state, "current_user", None)
     if not user or getattr(user, "role", "") != "admin":
         raise HTTPException(403, "Только admin")
+    notify_catalog, versions_catalog = await _load_catalogs(session)
     return templates.TemplateResponse(
         request,
         "group_form.html",
@@ -1591,7 +1857,11 @@ async def groups_new(
             "notify_json": '["all"]',
             "notify_preset": "all",
             "notify_selected": ["all"],
+            "notify_catalog": notify_catalog,
+            "versions_catalog": versions_catalog,
             "initial_version_keys": "",
+            "selected_version_keys": [],
+            "version_preset": "all",
         },
     )
 
@@ -1623,6 +1893,13 @@ async def groups_edit(
         .order_by(GroupVersionRoute.version_key)
     )
     version_rows = list((await session.execute(gv_stmt)).scalars().all())
+    notify_catalog, versions_catalog = await _load_catalogs(session)
+    notify_keys = {item["key"] for item in notify_catalog}
+    notify_selected = [str(x).strip() for x in (row.notify or ["all"]) if str(x).strip()]
+    if "all" not in notify_selected:
+        notify_selected = [k for k in notify_selected if k in notify_keys]
+    version_set = set(versions_catalog)
+    selected_versions = [r.version_key for r in version_rows if r.version_key in version_set]
     return templates.TemplateResponse(
         request,
         "group_form.html",
@@ -1641,7 +1918,11 @@ async def groups_edit(
             "version_msg": version_msg,
             "notify_json": json.dumps(row.notify, ensure_ascii=False),
             "notify_preset": _notify_preset(row.notify),
-            "notify_selected": row.notify or ["all"],
+            "notify_selected": notify_selected,
+            "notify_catalog": notify_catalog,
+            "versions_catalog": versions_catalog,
+            "selected_version_keys": selected_versions,
+            "version_preset": _version_preset(selected_versions, versions_catalog),
         },
     )
 
@@ -1655,6 +1936,9 @@ async def groups_create(
     is_active: Annotated[str, Form()] = "",
     initial_status_keys: Annotated[str, Form()] = "",
     initial_version_keys: Annotated[str, Form()] = "",
+    version_keys_json: Annotated[str, Form()] = "",
+    version_preset: Annotated[str, Form()] = "all",
+    version_values: Annotated[list[str], Form()] = [],
     notify_json: Annotated[str, Form()] = "",
     notify_preset: Annotated[str, Form()] = "all",
     notify_values: Annotated[list[str], Form()] = [],
@@ -1667,6 +1951,8 @@ async def groups_create(
     csrf_token: Annotated[str, Form()] = "",
     session: AsyncSession = Depends(get_session),
 ):
+    notify_catalog, versions_catalog = await _load_catalogs(session)
+    notify_allowed = [item["key"] for item in notify_catalog]
     _verify_csrf(request, csrf_token)
     user = getattr(request.state, "current_user", None)
     if not user or getattr(user, "role", "") != "admin":
@@ -1676,6 +1962,13 @@ async def groups_create(
         raise HTTPException(400, "Название обязательно")
     if n == GROUP_UNASSIGNED_NAME:
         raise HTTPException(400, "Это имя зарезервировано для системы")
+    if _normalized_group_filter_key(n) == _normalized_group_filter_key(GROUP_USERS_FILTER_ALL_LABEL):
+        raise HTTPException(400, "Это имя зарезервировано для фильтра списка пользователей")
+    existing_name = await session.execute(
+        select(SupportGroup.id).where(SupportGroup.name == n).limit(1)
+    )
+    if existing_name.scalar_one_or_none() is not None:
+        raise HTTPException(400, "Группа с таким названием уже существует")
     room = (room_id or "").strip()
     if not room:
         raise HTTPException(400, "Укажите ID комнаты группы")
@@ -1695,7 +1988,7 @@ async def groups_create(
     elif notify_preset == "overdue_only":
         notify = ["overdue"]
     elif notify_preset == "custom":
-        notify = _normalize_notify(notify_values)
+        notify = _normalize_notify(notify_values, notify_allowed)
     else:
         notify = _parse_notify(notify_json)
     row = SupportGroup(
@@ -1709,14 +2002,22 @@ async def groups_create(
         dnd=dnd in ("1", "on", "true"),
     )
     session.add(row)
-    await session.flush()
+    try:
+        await session.flush()
+    except IntegrityError:
+        raise HTTPException(400, "Не удалось создать группу: проверьте уникальность названия")
     rid = row.id
     for key in status_keys:
         ex = await session.execute(select(StatusRoomRoute.id).where(StatusRoomRoute.status_key == key))
         if ex.scalar_one_or_none():
             continue
         session.add(StatusRoomRoute(status_key=key, room_id=room))
-    for vkey in _parse_status_keys_list(initial_version_keys):
+    version_keys = _parse_json_string_list(version_keys_json) or _parse_status_keys_list(initial_version_keys)
+    if version_preset == "all":
+        version_keys = list(versions_catalog)
+    elif version_preset == "custom":
+        version_keys = _normalize_versions(version_values, versions_catalog)
+    for vkey in version_keys:
         ex = await session.execute(
             select(GroupVersionRoute.id).where(
                 GroupVersionRoute.group_id == rid,
@@ -1740,6 +2041,10 @@ async def groups_update(
     notify_json: Annotated[str, Form()] = "",
     notify_preset: Annotated[str, Form()] = "all",
     notify_values: Annotated[list[str], Form()] = [],
+    version_preset: Annotated[str, Form()] = "all",
+    version_values: Annotated[list[str], Form()] = [],
+    version_keys_json: Annotated[str, Form()] = "",
+    initial_version_keys: Annotated[str, Form()] = "",
     work_hours: Annotated[str, Form()] = "",
     work_hours_from: Annotated[str, Form()] = "",
     work_hours_to: Annotated[str, Form()] = "",
@@ -1749,6 +2054,8 @@ async def groups_update(
     csrf_token: Annotated[str, Form()] = "",
     session: AsyncSession = Depends(get_session),
 ):
+    notify_catalog, versions_catalog = await _load_catalogs(session)
+    notify_allowed = [item["key"] for item in notify_catalog]
     _verify_csrf(request, csrf_token)
     user = getattr(request.state, "current_user", None)
     if not user or getattr(user, "role", "") != "admin":
@@ -1763,6 +2070,13 @@ async def groups_update(
         raise HTTPException(400, "Название обязательно")
     if n == GROUP_UNASSIGNED_NAME:
         raise HTTPException(400, "Это имя зарезервировано для системы")
+    if _normalized_group_filter_key(n) == _normalized_group_filter_key(GROUP_USERS_FILTER_ALL_LABEL):
+        raise HTTPException(400, "Это имя зарезервировано для фильтра списка пользователей")
+    existing_name = await session.execute(
+        select(SupportGroup.id).where(SupportGroup.name == n, SupportGroup.id != group_id).limit(1)
+    )
+    if existing_name.scalar_one_or_none() is not None:
+        raise HTTPException(400, "Группа с таким названием уже существует")
     if work_hours_from and work_hours_to:
         wh = f"{work_hours_from.strip()}-{work_hours_to.strip()}"
     else:
@@ -1778,7 +2092,7 @@ async def groups_update(
     elif notify_preset == "overdue_only":
         notify = ["overdue"]
     elif notify_preset == "custom":
-        notify = _normalize_notify(notify_values)
+        notify = _normalize_notify(notify_values, notify_allowed)
     else:
         notify = _parse_notify(notify_json)
     old_room = (row.room_id or "").strip()
@@ -1791,6 +2105,30 @@ async def groups_update(
     row.work_hours = wh
     row.work_days = wd
     row.dnd = dnd in ("1", "on", "true")
+    if version_preset == "all":
+        submitted_versions = list(versions_catalog)
+    elif version_preset == "custom":
+        submitted_versions = _normalize_versions(version_values, versions_catalog)
+    else:
+        submitted_versions = _parse_json_string_list(version_keys_json) or _parse_status_keys_list(initial_version_keys)
+    existing_routes = list(
+        (
+            await session.execute(
+                select(GroupVersionRoute).where(GroupVersionRoute.group_id == group_id)
+            )
+        ).scalars().all()
+    )
+    existing_by_key = {r.version_key: r for r in existing_routes}
+    submitted_set = set(submitted_versions)
+    for r in existing_routes:
+        if r.version_key not in submitted_set:
+            await session.delete(r)
+    for key in submitted_versions:
+        ex = existing_by_key.get(key)
+        if ex:
+            ex.room_id = new_room
+            continue
+        session.add(GroupVersionRoute(group_id=group_id, version_key=key, room_id=new_room))
     if old_room and new_room and old_room != new_room:
         await session.execute(
             update(StatusRoomRoute).where(StatusRoomRoute.room_id == old_room).values(room_id=new_room)
@@ -1800,6 +2138,10 @@ async def groups_update(
             .where(GroupVersionRoute.group_id == group_id, GroupVersionRoute.room_id == old_room)
             .values(room_id=new_room)
         )
+    try:
+        await session.flush()
+    except IntegrityError:
+        raise HTTPException(400, "Не удалось сохранить группу: проверьте уникальность названия")
     return RedirectResponse(f"/groups/{group_id}/edit", status_code=303)
 
 
@@ -1990,6 +2332,7 @@ async def users_new(
     if not user or getattr(user, "role", "") != "admin":
         raise HTTPException(403, "Только admin")
     groups_rows = list((await session.execute(select(SupportGroup).order_by(SupportGroup.name.asc()))).scalars().all())
+    notify_catalog, versions_catalog = await _load_catalogs(session)
     return templates.TemplateResponse(
         request,
         "user_form.html",
@@ -2005,6 +2348,10 @@ async def users_new(
             "timezone_top_options": _top_timezone_options(),
             "timezone_all_options": _standard_timezone_options(),
             "timezone_labels": _timezone_labels(_standard_timezone_options()),
+            "notify_catalog": notify_catalog,
+            "versions_catalog": versions_catalog,
+            "selected_version_keys": [],
+            "version_preset": "all",
         },
     )
 
@@ -2017,22 +2364,21 @@ def _parse_notify(raw: str) -> list:
         return ["all"]
 
 
-def _normalize_notify(values: list[str] | None) -> list[str]:
+def _normalize_notify(values: list[str] | None, allowed_keys: list[str] | None = None) -> list[str]:
     vals = [v.strip() for v in (values or []) if v and v.strip()]
     if not vals:
         return ["all"]
     if "all" in vals:
         return ["all"]
-    allowed = [v for v in vals if v in NOTIFY_TYPE_KEYS]
+    allowed_set = set(allowed_keys or NOTIFY_TYPE_KEYS)
+    allowed = [v for v in vals if v in allowed_set]
     return allowed or ["all"]
 
 
 def _notify_preset(notify: list | None) -> str:
-    data = _normalize_notify([str(x) for x in (notify or [])])
-    if "all" in data:
+    values = [str(x).strip() for x in (notify or []) if str(x).strip()]
+    if not values or "all" in values:
         return "all"
-    # UI keeps only two presets: "all" and manual selection.
-    # Legacy stored values like ["new"] / ["overdue"] map to "custom".
     return "custom"
 
 
@@ -2054,6 +2400,31 @@ def _parse_work_hours_range(value: str) -> tuple[str, str]:
     return start.strip(), end.strip()
 
 
+def _normalize_versions(values: list[str] | None, allowed_values: list[str] | None = None) -> list[str]:
+    vals = [v.strip() for v in (values or []) if v and v.strip()]
+    if not vals:
+        return []
+    allowed_set = set((allowed_values or []))
+    if not allowed_set:
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for v in vals:
+        if v in seen or v not in allowed_set:
+            continue
+        seen.add(v)
+        out.append(v)
+    return out
+
+
+def _version_preset(selected: list[str] | None, catalog: list[str] | None) -> str:
+    selected_list = [str(x).strip() for x in (selected or []) if str(x).strip()]
+    if not selected_list:
+        return "all"
+    # Keep manual mode after save: any explicit selection is treated as "custom".
+    return "custom"
+
+
 @app.post("/users")
 async def users_create(
     request: Request,
@@ -2064,6 +2435,10 @@ async def users_create(
     notify_json: Annotated[str, Form()] = "",
     notify_preset: Annotated[str, Form()] = "all",
     notify_values: Annotated[list[str], Form()] = [],
+    initial_version_keys: Annotated[str, Form()] = "",
+    version_keys_json: Annotated[str, Form()] = "",
+    version_preset: Annotated[str, Form()] = "all",
+    version_values: Annotated[list[str], Form()] = [],
     timezone_name: Annotated[str, Form()] = "",
     work_hours: Annotated[str, Form()] = "",
     work_hours_from: Annotated[str, Form()] = "",
@@ -2074,6 +2449,8 @@ async def users_create(
     csrf_token: Annotated[str, Form()] = "",
     session: AsyncSession = Depends(get_session),
 ):
+    notify_catalog, _versions_catalog = await _load_catalogs(session)
+    notify_allowed = [item["key"] for item in notify_catalog]
     _verify_csrf(request, csrf_token)
     user = getattr(request.state, "current_user", None)
     if not user or getattr(user, "role", "") != "admin":
@@ -2093,7 +2470,7 @@ async def users_create(
     elif notify_preset == "overdue_only":
         notify = ["overdue"]
     elif notify_preset == "custom":
-        notify = _normalize_notify(notify_values)
+        notify = _normalize_notify(notify_values, notify_allowed)
     else:
         notify = _parse_notify(notify_json)
     row = BotUser(
@@ -2110,7 +2487,23 @@ async def users_create(
     )
     session.add(row)
     await session.flush()
-    return RedirectResponse(f"/users/{row.id}/edit", status_code=303)
+    if version_preset == "all":
+        version_keys = list(versions_catalog)
+    elif version_preset == "custom":
+        version_keys = _normalize_versions(version_values, versions_catalog)
+    else:
+        version_keys = _parse_json_string_list(version_keys_json) or _parse_status_keys_list(initial_version_keys)
+    for vkey in version_keys:
+        ex = await session.execute(
+            select(UserVersionRoute.id).where(
+                UserVersionRoute.bot_user_id == row.id,
+                UserVersionRoute.version_key == vkey,
+            )
+        )
+        if ex.scalar_one_or_none():
+            continue
+        session.add(UserVersionRoute(bot_user_id=row.id, version_key=vkey, room_id=row.room))
+    return RedirectResponse(f"/users/{row.id}/edit?saved=1", status_code=303)
 
 
 @app.get("/users/{user_id}/edit", response_class=HTMLResponse)
@@ -2127,6 +2520,7 @@ async def users_edit(
         raise HTTPException(404)
     version_err = (request.query_params.get("version_err") or "").strip()
     version_msg = (request.query_params.get("version_msg") or "").strip()
+    saved = (request.query_params.get("saved") or "").strip()
     uv_stmt = (
         select(UserVersionRoute)
         .where(UserVersionRoute.bot_user_id == user_id)
@@ -2134,6 +2528,13 @@ async def users_edit(
     )
     version_rows = list((await session.execute(uv_stmt)).scalars().all())
     groups_rows = list((await session.execute(select(SupportGroup).order_by(SupportGroup.name.asc()))).scalars().all())
+    notify_catalog, versions_catalog = await _load_catalogs(session)
+    notify_keys = {item["key"] for item in notify_catalog}
+    notify_selected = [str(x).strip() for x in (row.notify or ["all"]) if str(x).strip()]
+    if "all" not in notify_selected:
+        notify_selected = [k for k in notify_selected if k in notify_keys]
+    version_set = set(versions_catalog)
+    selected_versions = [r.version_key for r in version_rows if r.version_key in version_set]
     return templates.TemplateResponse(
         request,
         "user_form.html",
@@ -2142,7 +2543,7 @@ async def users_edit(
             "u": row,
             "notify_json": json.dumps(row.notify, ensure_ascii=False),
             "notify_preset": _notify_preset(row.notify),
-            "notify_selected": row.notify or ["all"],
+            "notify_selected": notify_selected,
             "groups": _groups_assignable(groups_rows),
             "group_unassigned_display": GROUP_UNASSIGNED_DISPLAY,
             "bot_tz": os.getenv("BOT_TIMEZONE", "Europe/Moscow"),
@@ -2150,8 +2551,14 @@ async def users_edit(
             "timezone_all_options": _standard_timezone_options(),
             "timezone_labels": _timezone_labels(_standard_timezone_options()),
             "version_routes": version_rows,
+            "version_keys_text": "\n".join(r.version_key for r in version_rows),
             "version_err": version_err,
             "version_msg": version_msg,
+            "notify_catalog": notify_catalog,
+            "versions_catalog": versions_catalog,
+            "selected_version_keys": selected_versions,
+            "version_preset": _version_preset(selected_versions, versions_catalog),
+            "saved": saved,
         },
     )
 
@@ -2167,6 +2574,10 @@ async def users_update(
     notify_json: Annotated[str, Form()] = "",
     notify_preset: Annotated[str, Form()] = "all",
     notify_values: Annotated[list[str], Form()] = [],
+    version_preset: Annotated[str, Form()] = "all",
+    version_values: Annotated[list[str], Form()] = [],
+    version_keys_text: Annotated[str, Form()] = "",
+    version_keys_json: Annotated[str, Form()] = "",
     timezone_name: Annotated[str, Form()] = "",
     work_hours: Annotated[str, Form()] = "",
     work_hours_from: Annotated[str, Form()] = "",
@@ -2177,6 +2588,8 @@ async def users_update(
     csrf_token: Annotated[str, Form()] = "",
     session: AsyncSession = Depends(get_session),
 ):
+    notify_catalog, versions_catalog = await _load_catalogs(session)
+    notify_allowed = [item["key"] for item in notify_catalog]
     _verify_csrf(request, csrf_token)
     user = getattr(request.state, "current_user", None)
     if not user or getattr(user, "role", "") != "admin":
@@ -2198,7 +2611,7 @@ async def users_update(
     elif notify_preset == "overdue_only":
         row.notify = ["overdue"]
     elif notify_preset == "custom":
-        row.notify = _normalize_notify(notify_values)
+        row.notify = _normalize_notify(notify_values, notify_allowed)
     else:
         row.notify = _parse_notify(notify_json)
     if work_hours_from and work_hours_to:
@@ -2210,13 +2623,37 @@ async def users_update(
     else:
         row.work_days = _parse_work_days(work_days_json)
     row.dnd = dnd in ("on", "true", "1")
+    if version_preset == "all":
+        submitted_versions = list(versions_catalog)
+    elif version_preset == "custom":
+        submitted_versions = _normalize_versions(version_values, versions_catalog)
+    else:
+        submitted_versions = _parse_json_string_list(version_keys_json) or _parse_status_keys_list(version_keys_text)
+    existing_routes = list(
+        (
+            await session.execute(
+                select(UserVersionRoute).where(UserVersionRoute.bot_user_id == user_id)
+            )
+        ).scalars().all()
+    )
+    existing_by_key = {r.version_key: r for r in existing_routes}
+    submitted_set = set(submitted_versions)
+    for r in existing_routes:
+        if r.version_key not in submitted_set:
+            await session.delete(r)
+    for key in submitted_versions:
+        ex = existing_by_key.get(key)
+        if ex:
+            ex.room_id = new_room
+            continue
+        session.add(UserVersionRoute(bot_user_id=user_id, version_key=key, room_id=new_room))
     if old_room and new_room and old_room != new_room:
         await session.execute(
             update(UserVersionRoute)
             .where(UserVersionRoute.bot_user_id == user_id, UserVersionRoute.room_id == old_room)
             .values(room_id=new_room)
         )
-    return RedirectResponse(f"/users/{user_id}/edit", status_code=303)
+    return RedirectResponse(f"/users/{user_id}/edit?saved=1", status_code=303)
 
 
 @app.post("/users/{user_id}/version-routes/add")
@@ -2602,6 +3039,7 @@ async def me_settings_get(
         return RedirectResponse(DASHBOARD_PATH, status_code=303)
 
     redmine_id = getattr(user, "redmine_id", None)
+    notify_catalog, _versions_catalog = await _load_catalogs(session)
     csrf_token, set_cookie = _ensure_csrf(request)
     if redmine_id is None:
         resp = templates.TemplateResponse(
@@ -2612,6 +3050,7 @@ async def me_settings_get(
                 "notify_json": '["all"]',
                 "notify_preset": "all",
                 "notify_selected": ["all"],
+                "notify_catalog": notify_catalog,
                 "work_hours": "",
                 "work_hours_from": "",
                 "work_hours_to": "",
@@ -2640,6 +3079,10 @@ async def me_settings_get(
     bot_user = r.scalar_one_or_none()
     if not bot_user:
         raise HTTPException(404, "BotUser не найден")
+    notify_selected = [str(x).strip() for x in (bot_user.notify or ["all"]) if str(x).strip()]
+    notify_keys = {item["key"] for item in notify_catalog}
+    if "all" not in notify_selected:
+        notify_selected = [k for k in notify_selected if k in notify_keys]
 
     resp = templates.TemplateResponse(
         request,
@@ -2650,7 +3093,8 @@ async def me_settings_get(
             if bot_user.notify is not None
             else '["all"]',
             "notify_preset": _notify_preset(bot_user.notify),
-            "notify_selected": bot_user.notify or ["all"],
+            "notify_selected": notify_selected,
+            "notify_catalog": notify_catalog,
             "work_hours": bot_user.work_hours or "",
             "work_hours_from": _parse_work_hours_range(bot_user.work_hours or "")[0],
             "work_hours_to": _parse_work_hours_range(bot_user.work_hours or "")[1],
@@ -2689,6 +3133,8 @@ async def me_settings_post(
     csrf_token: Annotated[str, Form()] = "",
     session: AsyncSession = Depends(get_session),
 ):
+    notify_catalog, _versions_catalog = await _load_catalogs(session)
+    notify_allowed = [item["key"] for item in notify_catalog]
     _verify_csrf(request, csrf_token)
     user = getattr(request.state, "current_user", None)
     if not user:
@@ -2715,7 +3161,7 @@ async def me_settings_post(
     elif notify_preset == "overdue_only":
         bot_user.notify = ["overdue"]
     elif notify_preset == "custom":
-        bot_user.notify = _normalize_notify(notify_values)
+        bot_user.notify = _normalize_notify(notify_values, notify_allowed)
     else:
         bot_user.notify = _parse_notify(notify_json)
     bot_user.timezone = (timezone_name or "").strip() or None

@@ -29,13 +29,13 @@
 
         <div class="user-form-row-2">
           <div class="field">
-            <label for="redmine_id">Redmine user ID</label>
+            <label for="redmine_id">ID redmine пользователя</label>
             <input type="number" id="redmine_id" name="redmine_id" required min="1" step="1"
               value="{{ u.redmine_id if u else '' }}" placeholder="например, 42"/>
             <p class="field-hint">Числовой id пользователя в Redmine (в профиле или в URL <code>/users/…</code>).</p>
           </div>
           <div class="field">
-            <label for="room">Matrix room ID</label>
+            <label for="room">ID комнаты пользователя</label>
             <input type="text" id="room" name="room" required
               value="{{ u.room if u else '' }}" placeholder="!xxx:server"/>
           </div>
@@ -49,24 +49,55 @@
 
       <article class="card user-form-section">
         <h2 class="section-title">Типы уведомлений</h2>
-        <fieldset>
-          <legend>Типы уведомлений</legend>
-          <div class="notify-presets-inline">
-            <label class="choice"><input type="radio" name="notify_preset" value="all" {% if notify_preset == "all" %}checked{% endif %}/> Все уведомления</label>
-            <label class="choice"><input type="radio" name="notify_preset" value="custom" {% if notify_preset == "custom" %}checked{% endif %}/> Выбрать уведомления</label>
+        <div class="day-pills" role="group" aria-label="Режим уведомлений">
+          <label class="day-pill form-pill">
+            <input type="radio" class="day-pill__input" name="notify_preset" value="all" {% if notify_preset == "all" %}checked{% endif %}/>
+            <span class="day-pill__text">Все уведомления</span>
+          </label>
+          <label class="day-pill form-pill">
+            <input type="radio" class="day-pill__input" name="notify_preset" value="custom" {% if notify_preset == "custom" %}checked{% endif %}/>
+            <span class="day-pill__text">Выбрать уведомления</span>
+          </label>
+        </div>
+        <div id="notify_custom_box" class="sub-panel">
+          <div class="day-pills" role="group" aria-label="Выбор уведомлений">
+            {% for item in notify_catalog %}
+            <label class="day-pill form-pill">
+              <input type="checkbox" class="day-pill__input" name="notify_values" value="{{ item.key }}" {% if item.key in notify_selected %}checked{% endif %}/>
+              <span class="day-pill__text">{{ item.label }}</span>
+            </label>
+            {% endfor %}
           </div>
-          <div id="notify_custom_box" class="sub-panel">
-            <div class="choice-grid">
-              {% for key, label in [
-                ("new", "Новая задача"), ("info", "Информация предоставлена"), ("reminder", "Напоминание"),
-                ("overdue", "Просроченная"), ("status_change", "Смена статуса"), ("issue_updated", "Обновление"), ("reopened", "Переоткрыта")
-              ] %}
-                <label class="choice"><input type="checkbox" name="notify_values" value="{{ key }}" {% if key in notify_selected %}checked{% endif %}/> {{ label }}</label>
-              {% endfor %}
-            </div>
-            <input type="hidden" name="notify_json" value="{{ notify_json }}"/>
+          <input type="hidden" name="notify_json" value="{{ notify_json }}"/>
+        </div>
+
+        <h3 class="section-subtitle">Версии</h3>
+        <div class="day-pills" role="group" aria-label="Режим версий">
+          <label class="day-pill form-pill">
+            <input type="radio" class="day-pill__input" name="version_preset" value="all" {% if version_preset == "all" %}checked{% endif %}/>
+            <span class="day-pill__text">Все версии</span>
+          </label>
+          <label class="day-pill form-pill">
+            <input type="radio" class="day-pill__input" name="version_preset" value="custom" {% if version_preset == "custom" %}checked{% endif %}/>
+            <span class="day-pill__text">Выбрать версии</span>
+          </label>
+        </div>
+        <div id="versions_custom_box" class="sub-panel">
+          <div class="day-pills" role="group" aria-label="Выбор версий">
+            {% for version_name in versions_catalog %}
+            <label class="day-pill form-pill">
+              <input type="checkbox" class="day-pill__input version-choice" name="version_values" value="{{ version_name }}" {% if version_name in selected_version_keys %}checked{% endif %}/>
+              <span class="day-pill__text">{{ version_name }}</span>
+            </label>
+            {% endfor %}
           </div>
-        </fieldset>
+          <input type="hidden" id="version_keys_json" name="version_keys_json" value='{{ selected_version_keys|tojson }}'/>
+          {% if not u %}
+          <input type="hidden" id="initial_version_keys" name="initial_version_keys" value=""/>
+          {% else %}
+          <input type="hidden" id="version_keys_text" name="version_keys_text" value="{{ version_keys_text if version_keys_text else '' }}"/>
+          {% endif %}
+        </div>
       </article>
 
       <article class="card user-form-section">
@@ -126,6 +157,7 @@
         <div class="summary-line"><span class="k">Redmine ID</span><span class="v" id="summary_redmine_id">—</span></div>
         <div class="summary-line"><span class="k">Комната</span><span class="v" id="summary_room">—</span></div>
         <div class="summary-line"><span class="k">Уведомления</span><span class="v" id="summary_notify">—</span></div>
+        <div class="summary-line"><span class="k">Версии</span><span class="v" id="summary_versions">—</span></div>
         <div class="summary-line"><span class="k">Таймзона</span><span class="v" id="summary_timezone">—</span></div>
         <div class="summary-line"><span class="k">Часы</span><span class="v" id="summary_hours">—</span></div>
         <div class="summary-line"><span class="k">Не беспокоить</span><span class="v" id="summary_dnd">—</span></div>
@@ -138,6 +170,17 @@
   </div>
 </form>
 </div>
+{% if saved == "1" %}
+<div class="backdrop show" id="user-saved-backdrop" style="display:block;"></div>
+<div class="save-modal" id="user-saved-modal" role="dialog" aria-modal="true" aria-label="Пользователь сохранен">
+  <h3 style="margin-top:0;">Пользователь сохранен</h3>
+  <p class="muted" style="margin:0 0 0.9rem;">Создать нового?</p>
+  <div class="page-actions" style="margin-top:0;">
+    <a class="btn btn-primary" href="/users/new">Создать нового</a>
+    <button class="btn btn-ghost" type="button" id="user-saved-cancel">Отмена</button>
+  </div>
+</div>
+{% endif %}
 <script>
   document.addEventListener('DOMContentLoaded', function () {
     const btn = document.getElementById('redmine_lookup_btn');
@@ -195,11 +238,25 @@
       const opt = selectEl.options[selectEl.selectedIndex];
       return opt ? (opt.textContent || '').trim() || '—' : '—';
     }
+    function checkedLabels(selector) {
+      return Array.from(document.querySelectorAll(selector))
+        .filter(function (el) { return el.checked; })
+        .map(function (el) { return String(el.parentElement?.textContent || '').trim(); })
+        .filter(Boolean);
+    }
     function selectedNotifyLabel() {
       const active = document.querySelector('input[name="notify_preset"]:checked');
       if (!active) return '—';
       if (active.value === 'all') return 'Все уведомления';
-      return 'Выбрать уведомления';
+      const labels = checkedLabels('input[name="notify_values"]');
+      return labels.length ? labels.join(', ') : '—';
+    }
+    function selectedVersionsLabel() {
+      const active = document.querySelector('input[name="version_preset"]:checked');
+      if (!active) return '—';
+      if (active.value === 'all') return 'Все версии';
+      const labels = checkedLabels('input[name="version_values"]');
+      return labels.length ? labels.join(', ') : '—';
     }
     function selectedHours() {
       const from = document.getElementById('work_hours_from');
@@ -215,7 +272,9 @@
     }
     function setSummary(id, value) {
       const el = document.getElementById(id);
-      if (el) el.textContent = value;
+      if (!el) return;
+      el.textContent = value;
+      el.title = value && value !== '—' ? value : '';
     }
     function refreshSummary() {
       setSummary('summary_name', textOrDash(document.getElementById('display_name')?.value));
@@ -223,6 +282,7 @@
       setSummary('summary_redmine_id', textOrDash(document.getElementById('redmine_id')?.value));
       setSummary('summary_room', textOrDash(document.getElementById('room')?.value));
       setSummary('summary_notify', selectedNotifyLabel());
+      setSummary('summary_versions', selectedVersionsLabel());
       setSummary('summary_timezone', textOrDash(document.getElementById('timezone_name')?.value || '{{ bot_tz }}'));
       setSummary('summary_hours', selectedHours());
       setSummary('summary_dnd', dndLabel());
@@ -240,6 +300,38 @@
     refresh();
   })();
 
+  (function () {
+    const radios = Array.from(document.querySelectorAll('input[name="version_preset"]'));
+    const box = document.getElementById('versions_custom_box');
+    const choices = Array.from(document.querySelectorAll('input[name="version_values"]'));
+    const hiddenJson = document.getElementById('version_keys_json');
+    const hiddenText = document.getElementById('version_keys_text');
+    const hiddenInitial = document.getElementById('initial_version_keys');
+    function refreshBox() {
+      const current = radios.find(r => r.checked);
+      if (!box) return;
+      box.style.display = current && current.value === 'custom' ? 'block' : 'none';
+    }
+    function syncVersions() {
+      const current = radios.find(r => r.checked);
+      let values = [];
+      if (current && current.value === 'all') {
+        values = choices.map(c => c.value.trim()).filter(Boolean);
+      } else {
+        values = choices.filter(c => c.checked).map(c => c.value.trim()).filter(Boolean);
+      }
+      if (hiddenJson) hiddenJson.value = JSON.stringify(values);
+      const textValue = values.join(', ');
+      if (hiddenText) hiddenText.value = textValue;
+      if (hiddenInitial) hiddenInitial.value = textValue;
+      refreshSummary();
+    }
+    radios.forEach(function (radio) { radio.addEventListener('change', function () { refreshBox(); syncVersions(); }); });
+    choices.forEach(function (choice) { choice.addEventListener('change', syncVersions); });
+    refreshBox();
+    syncVersions();
+  })();
+
     ['display_name', 'redmine_id', 'room', 'timezone_name', 'work_hours_from', 'work_hours_to', 'dnd', 'group_id'].forEach(function (id) {
       const el = document.getElementById(id);
       if (!el) return;
@@ -249,63 +341,29 @@
         el.addEventListener('change', refreshSummary);
       }
     });
+    Array.from(document.querySelectorAll('input[name="notify_values"], input[name="version_values"], input[name="version_preset"]')).forEach(function (el) {
+      el.addEventListener('change', refreshSummary);
+    });
+    const savedCancel = document.getElementById('user-saved-cancel');
+    if (savedCancel) {
+      const closeSavedModal = function () {
+        const modal = document.getElementById('user-saved-modal');
+        const backdrop = document.getElementById('user-saved-backdrop');
+        if (modal) modal.style.display = 'none';
+        if (backdrop) backdrop.style.display = 'none';
+        const url = new URL(window.location.href);
+        url.searchParams.delete('saved');
+        window.history.replaceState({}, '', url.pathname + (url.search || ''));
+      };
+      savedCancel.addEventListener('click', closeSavedModal);
+      const savedBackdrop = document.getElementById('user-saved-backdrop');
+      if (savedBackdrop) savedBackdrop.addEventListener('click', closeSavedModal);
+      document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape') closeSavedModal();
+      });
+    }
     refreshSummary();
   });
 </script>
 
-{% if u %}
-<div class="card" style="margin-top:1.25rem;">
-  <h2 style="margin-top:0;">Версии</h2>
-  <p class="muted">Если <strong>название версии</strong> задачи в Redmine содержит указанный фрагмент (без учёта регистра), уведомление о новой задаче / РВ дополнительно уходит в <strong>личную</strong> комнату пользователя (поле Matrix room ID выше).</p>
-  {% if version_err == "no_room" %}
-  <p class="error">Сначала укажите Matrix room ID и сохраните форму выше.</p>
-  {% elif version_err == "empty" %}
-  <p class="error">Введите ключ версии.</p>
-  {% elif version_err == "exists" %}
-  <p class="error">Такой ключ версии уже есть у этого пользователя.</p>
-  {% endif %}
-  {% if version_msg == "added" %}
-  <p class="muted">Версия добавлена.</p>
-  {% elif version_msg == "deleted" %}
-  <p class="muted">Запись удалена.</p>
-  {% endif %}
-
-  {% set _urid = (u.room or "").strip() %}
-  {% if _urid %}
-  <div class="table-wrap" style="margin-top:0.75rem;">
-    <table>
-      <thead><tr><th>Ключ версии</th><th>Комната</th><th class="table-actions" aria-label="Действия"></th></tr></thead>
-      <tbody>
-        {% for r in version_routes %}
-        <tr>
-          <td>{{ r.version_key }}</td>
-          <td><code class="mono-truncate">{{ r.room_id }}</code></td>
-          <td class="table-actions">
-            <form method="post" action="/users/{{ u.id }}/version-routes/{{ r.id }}/delete" style="display:inline;" hx-confirm="Удалить привязку версии?">
-              <input type="hidden" name="csrf_token" value="{{ request.state._state.get('csrf_token', '') }}"/>
-              <button type="submit" class="btn btn-danger">Удалить</button>
-            </form>
-          </td>
-        </tr>
-        {% else %}
-        <tr class="table-empty"><td colspan="3">Пока нет личных привязок по версии</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-  <form class="form" method="post" action="/users/{{ u.id }}/version-routes/add" style="margin-top:1rem;">
-    <input type="hidden" name="csrf_token" value="{{ request.state._state.get('csrf_token', '') }}"/>
-    <div class="field">
-      <label for="user_version_key_new">Добавить ключ версии</label>
-      <input type="text" id="user_version_key_new" name="version_key" placeholder="Например: РЕД ОС" required/>
-    </div>
-    <div class="page-actions">
-      <button type="submit" class="btn btn-primary">Добавить</button>
-    </div>
-  </form>
-  {% else %}
-  <p class="muted">Укажите Matrix room ID в форме выше и сохраните.</p>
-  {% endif %}
-</div>
-{% endif %}
 {% endblock %}

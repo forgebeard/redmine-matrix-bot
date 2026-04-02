@@ -19,9 +19,7 @@
         <option value="">Все группы</option>
         <option value="-1" {% if group_filter == -1 %}selected{% endif %}>{{ GROUP_UNASSIGNED_DISPLAY }}</option>
         {% for g in groups %}
-          {% if g.name|trim|lower != GROUP_USERS_FILTER_ALL_LABEL|lower %}
           <option value="{{ g.id }}" {% if group_filter == g.id %}selected{% endif %}>{{ g.name }}</option>
-          {% endif %}
         {% endfor %}
       </select>
     </div>

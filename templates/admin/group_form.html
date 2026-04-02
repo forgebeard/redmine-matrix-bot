@@ -28,35 +28,50 @@
 
         <article class="card user-form-section">
           <h2 class="section-title">Типы уведомлений</h2>
-          <fieldset>
-            <legend>Типы уведомлений</legend>
-            <div class="notify-presets-inline">
-              <label class="choice"><input type="radio" name="notify_preset" value="all" {% if notify_preset == "all" %}checked{% endif %}/> Все уведомления</label>
-              <label class="choice"><input type="radio" name="notify_preset" value="custom" {% if notify_preset == "custom" %}checked{% endif %}/> Выбрать уведомления</label>
+          <div class="day-pills" role="group" aria-label="Режим уведомлений">
+            <label class="day-pill form-pill">
+              <input type="radio" class="day-pill__input" name="notify_preset" value="all" {% if notify_preset == "all" %}checked{% endif %}/>
+              <span class="day-pill__text">Все уведомления</span>
+            </label>
+            <label class="day-pill form-pill">
+              <input type="radio" class="day-pill__input" name="notify_preset" value="custom" {% if notify_preset == "custom" %}checked{% endif %}/>
+              <span class="day-pill__text">Выбрать уведомления</span>
+            </label>
+          </div>
+          <div id="notify_custom_box_group" class="sub-panel">
+            <div class="day-pills" role="group" aria-label="Выбор уведомлений">
+              {% for item in notify_catalog %}
+              <label class="day-pill form-pill">
+                <input type="checkbox" class="day-pill__input" name="notify_values" value="{{ item.key }}" {% if item.key in notify_selected %}checked{% endif %}/>
+                <span class="day-pill__text">{{ item.label }}</span>
+              </label>
+              {% endfor %}
             </div>
-            <div id="notify_custom_box_group" class="sub-panel">
-              <div class="choice-grid">
-                {% for key, label in [
-                  ("new", "Новая задача"), ("info", "Информация предоставлена"), ("reminder", "Напоминание"),
-                  ("overdue", "Просроченная"), ("status_change", "Смена статуса"), ("issue_updated", "Обновление"), ("reopened", "Переоткрыта")
-                ] %}
-                  <label class="choice"><input type="checkbox" name="notify_values" value="{{ key }}" {% if key in notify_selected %}checked{% endif %}/> {{ label }}</label>
-                {% endfor %}
-              </div>
-              <input type="hidden" name="notify_json" value="{{ notify_json }}"/>
+            <input type="hidden" name="notify_json" value="{{ notify_json }}"/>
+          </div>
+          <h3 class="section-subtitle">Версии</h3>
+          <div class="day-pills" role="group" aria-label="Режим версий">
+            <label class="day-pill form-pill">
+              <input type="radio" class="day-pill__input" name="version_preset" value="all" {% if version_preset == "all" %}checked{% endif %}/>
+              <span class="day-pill__text">Все версии</span>
+            </label>
+            <label class="day-pill form-pill">
+              <input type="radio" class="day-pill__input" name="version_preset" value="custom" {% if version_preset == "custom" %}checked{% endif %}/>
+              <span class="day-pill__text">Выбрать версии</span>
+            </label>
+          </div>
+          <div id="group_versions_custom_box" class="sub-panel">
+            <div class="day-pills" role="group" aria-label="Выбор версий">
+              {% for version_name in versions_catalog %}
+              <label class="day-pill form-pill">
+                <input type="checkbox" class="day-pill__input group-version-choice" name="version_values" value="{{ version_name }}" {% if selected_version_keys and version_name in selected_version_keys %}checked{% endif %}/>
+                <span class="day-pill__text">{{ version_name }}</span>
+              </label>
+              {% endfor %}
             </div>
-          </fieldset>
-          {% if not g %}
-          <fieldset>
-            <legend>Версии</legend>
-            <div class="sub-panel">
-              <div class="field">
-                <label for="initial_version_keys">Ключи версий</label>
-                <textarea id="initial_version_keys" name="initial_version_keys" rows="3" placeholder="Подстрока в названии версии задачи в Redmine — с новой строки или через запятую"></textarea>
-              </div>
-            </div>
-          </fieldset>
-          {% endif %}
+            <input type="hidden" id="group_version_keys_json" name="version_keys_json" value='{{ selected_version_keys|default([])|tojson }}'/>
+            <input type="hidden" id="initial_version_keys" name="initial_version_keys" value=""/>
+          </div>
         </article>
 
         <article class="card user-form-section">
@@ -117,6 +132,7 @@
           <div class="summary-line"><span class="k">Таймзона</span><span class="v" id="summary_group_tz">—</span></div>
           <div class="summary-line"><span class="k">Активна</span><span class="v" id="summary_group_active">Да</span></div>
           <div class="summary-line"><span class="k">Уведомления</span><span class="v" id="summary_group_notify">—</span></div>
+          <div class="summary-line"><span class="k">Версии</span><span class="v" id="summary_group_versions">—</span></div>
           <div class="summary-line"><span class="k">Часы</span><span class="v" id="summary_group_hours">—</span></div>
           <div class="summary-line"><span class="k">Не беспокоить</span><span class="v" id="summary_group_dnd">—</span></div>
           <div class="page-actions" style="margin-top:1rem;">
@@ -142,6 +158,35 @@
     refresh();
   })();
 
+  (function () {
+    const radios = Array.from(document.querySelectorAll('input[name="version_preset"]'));
+    const box = document.getElementById('group_versions_custom_box');
+    const choices = Array.from(document.querySelectorAll('input[name="version_values"]'));
+    const hiddenJson = document.getElementById('group_version_keys_json');
+    const hiddenInitial = document.getElementById('initial_version_keys');
+    function refreshBox() {
+      const current = radios.find(r => r.checked);
+      if (!box) return;
+      box.style.display = current && current.value === 'custom' ? 'block' : 'none';
+    }
+    function syncVersions() {
+      const current = radios.find(r => r.checked);
+      let values = [];
+      if (current && current.value === 'all') {
+        values = choices.map(c => c.value.trim()).filter(Boolean);
+      } else {
+        values = choices.filter(c => c.checked).map(c => c.value.trim()).filter(Boolean);
+      }
+      if (hiddenJson) hiddenJson.value = JSON.stringify(values);
+      if (hiddenInitial) hiddenInitial.value = values.join(', ');
+      refreshSummary();
+    }
+    radios.forEach(function (radio) { radio.addEventListener('change', function () { refreshBox(); syncVersions(); }); });
+    choices.forEach(function (choice) { choice.addEventListener('change', syncVersions); });
+    refreshBox();
+    syncVersions();
+  })();
+
   function textOrDash(v) {
     const value = String(v || '').trim();
     return value || '—';
@@ -150,7 +195,21 @@
     const active = document.querySelector('input[name="notify_preset"]:checked');
     if (!active) return '—';
     if (active.value === 'all') return 'Все уведомления';
-    return 'Выбрать уведомления';
+    const labels = Array.from(document.querySelectorAll('input[name="notify_values"]'))
+      .filter(el => el.checked)
+      .map(el => String(el.parentElement?.textContent || '').trim())
+      .filter(Boolean);
+    return labels.length ? labels.join(', ') : '—';
+  }
+  function selectedVersionsLabel() {
+    const active = document.querySelector('input[name="version_preset"]:checked');
+    if (!active) return '—';
+    if (active.value === 'all') return 'Все версии';
+    const labels = Array.from(document.querySelectorAll('input[name="version_values"]'))
+      .filter(el => el.checked)
+      .map(el => String(el.parentElement?.textContent || '').trim())
+      .filter(Boolean);
+    return labels.length ? labels.join(', ') : '—';
   }
   function selectedHours() {
     const from = document.getElementById('work_hours_from_group');
@@ -170,7 +229,9 @@
   }
   function setSummary(id, value) {
     const el = document.getElementById(id);
-    if (el) el.textContent = value;
+    if (!el) return;
+    el.textContent = value;
+    el.title = value && value !== '—' ? value : '';
   }
   function refreshSummary() {
     setSummary('summary_group_name', textOrDash(document.getElementById('name')?.value));
@@ -178,6 +239,7 @@
     setSummary('summary_group_tz', textOrDash(document.getElementById('timezone_name')?.value || '{{ bot_tz }}'));
     setSummary('summary_group_active', activeLabel());
     setSummary('summary_group_notify', selectedNotifyLabel());
+    setSummary('summary_group_versions', selectedVersionsLabel());
     setSummary('summary_group_hours', selectedHours());
     setSummary('summary_group_dnd', dndLabel());
   }
@@ -191,115 +253,10 @@
   Array.from(document.querySelectorAll('input[name="notify_preset"]')).forEach(function (el) {
     el.addEventListener('change', refreshSummary);
   });
+  Array.from(document.querySelectorAll('input[name="notify_values"], input[name="version_values"], input[name="version_preset"]')).forEach(function (el) {
+    el.addEventListener('change', refreshSummary);
+  });
   refreshSummary();
 </script>
 
-{% if g %}
-<div class="card content-stack" style="margin-top:1.25rem;">
-  <h2 style="margin-top:0;">Статусы</h2>
-  <p class="muted">Уведомления о смене статуса задачи дублируются в комнату группы по <strong>точному</strong> имени статуса из Redmine.</p>
-  {% if status_err == "no_room" %}
-  <p class="error">Сначала укажите ID комнаты группы и сохраните форму выше.</p>
-  {% elif status_err == "empty" %}
-  <p class="error">Введите имя статуса.</p>
-  {% elif status_err == "exists" %}
-  <p class="error">Такой статус уже привязан к другой комнате (имена статусов в Redmine глобальны).</p>
-  {% endif %}
-  {% if status_msg == "added" %}
-  <p class="muted">Статус добавлен.</p>
-  {% elif status_msg == "deleted" %}
-  <p class="muted">Статус удалён.</p>
-  {% endif %}
-
-  {% set _rid = (g.room_id or "").strip() %}
-  {% if _rid %}
-  <div class="table-wrap" style="margin-top:0.75rem;">
-    <table>
-      <thead><tr><th>Статус</th><th class="table-actions" aria-label="Действия"></th></tr></thead>
-      <tbody>
-        {% for r in status_routes %}
-        <tr>
-          <td>{{ r.status_key }}</td>
-          <td class="table-actions">
-            <form method="post" action="/groups/{{ g.id }}/status-routes/{{ r.id }}/delete" style="display:inline;" hx-confirm="Удалить привязку статуса?">
-              <input type="hidden" name="csrf_token" value="{{ request.state._state.get('csrf_token', '') }}"/>
-              <button type="submit" class="btn btn-danger">Удалить</button>
-            </form>
-          </td>
-        </tr>
-        {% else %}
-        <tr class="table-empty"><td colspan="2">Пока нет статусов для этой комнаты</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-  <form class="form" method="post" action="/groups/{{ g.id }}/status-routes/add" style="margin-top:1rem;">
-    <input type="hidden" name="csrf_token" value="{{ request.state._state.get('csrf_token', '') }}"/>
-    <div class="field">
-      <label for="status_key_new">Добавить статус</label>
-      <input type="text" id="status_key_new" name="status_key" placeholder="Например: Передано в работу.РВ" required/>
-    </div>
-    <div class="page-actions">
-      <button type="submit" class="btn btn-primary">Добавить</button>
-    </div>
-  </form>
-  {% else %}
-  <p class="muted">Укажите ID комнаты группы в форме выше и сохраните — здесь появится список статусов.</p>
-  {% endif %}
-</div>
-
-<div class="card content-stack" style="margin-top:1.25rem;">
-  <h2 style="margin-top:0;">Версии</h2>
-  <p class="muted">Если <strong>название версии</strong> задачи в Redmine содержит указанный фрагмент (без учёта регистра), уведомление о новой задаче / РВ дополнительно уходит в комнату группы.</p>
-  {% if version_err == "no_room" %}
-  <p class="error">Сначала укажите ID комнаты группы и сохраните форму выше.</p>
-  {% elif version_err == "empty" %}
-  <p class="error">Введите ключ версии.</p>
-  {% elif version_err == "exists" %}
-  <p class="error">Такой ключ версии уже есть у этой группы.</p>
-  {% endif %}
-  {% if version_msg == "added" %}
-  <p class="muted">Версия добавлена.</p>
-  {% elif version_msg == "deleted" %}
-  <p class="muted">Запись удалена.</p>
-  {% endif %}
-
-  {% set _rid = (g.room_id or "").strip() %}
-  {% if _rid %}
-  <div class="table-wrap" style="margin-top:0.75rem;">
-    <table>
-      <thead><tr><th>Ключ версии</th><th>Комната</th><th class="table-actions" aria-label="Действия"></th></tr></thead>
-      <tbody>
-        {% for r in version_routes %}
-        <tr>
-          <td>{{ r.version_key }}</td>
-          <td><code class="mono-truncate">{{ r.room_id }}</code></td>
-          <td class="table-actions">
-            <form method="post" action="/groups/{{ g.id }}/version-routes/{{ r.id }}/delete" style="display:inline;" hx-confirm="Удалить привязку версии?">
-              <input type="hidden" name="csrf_token" value="{{ request.state._state.get('csrf_token', '') }}"/>
-              <button type="submit" class="btn btn-danger">Удалить</button>
-            </form>
-          </td>
-        </tr>
-        {% else %}
-        <tr class="table-empty"><td colspan="3">Пока нет привязок по версии</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-  <form class="form" method="post" action="/groups/{{ g.id }}/version-routes/add" style="margin-top:1rem;">
-    <input type="hidden" name="csrf_token" value="{{ request.state._state.get('csrf_token', '') }}"/>
-    <div class="field">
-      <label for="version_key_new">Добавить ключ версии</label>
-      <input type="text" id="version_key_new" name="version_key" placeholder="Например: РЕД ОС" required/>
-    </div>
-    <div class="page-actions">
-      <button type="submit" class="btn btn-primary">Добавить</button>
-    </div>
-  </form>
-  {% else %}
-  <p class="muted">Укажите ID комнаты группы в форме выше и сохраните.</p>
-  {% endif %}
-</div>
-{% endif %}
 {% endblock %}

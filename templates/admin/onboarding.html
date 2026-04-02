@@ -1,41 +1,324 @@
 {% extends "base.html" %}
 {% from "macros.html" import page_head %}
-{% block title %}Настройки подключений{% endblock %}
+{% block title %}Настройки{% endblock %}
 {% block content %}
-{{ page_head("Настройки подключений") }}
+{{ page_head("Настройки") }}
 {% if error %}<p class="error">{{ error }}</p>{% endif %}
-<div class="card content-stack">
-  <form class="form" method="post" action="/onboarding/save" style="margin-top:0;">
+<div class="page-settings page-settings--wide">
+<div class="card card--settings settings-root">
+  <form class="form form--settings" method="post" action="/onboarding/save" style="margin-top:0;" id="settings-form">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}"/>
-    <div class="card card-nested stack">
-      <h2 style="margin-top:0;">Redmine</h2>
-      <div class="field">
-        <label for="secret_REDMINE_URL">Адрес Redmine</label>
-        <input id="secret_REDMINE_URL" name="secret_REDMINE_URL" type="text" placeholder="https://redmine.company.local"/>
-      </div>
-      <div class="field">
-        <label for="secret_REDMINE_API_KEY">API-ключ Redmine</label>
-        <input id="secret_REDMINE_API_KEY" name="secret_REDMINE_API_KEY" type="text" placeholder="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"/>
-      </div>
+    <input type="hidden" id="catalog_notify_json" name="catalog_notify_json" value='{{ notify_catalog|tojson }}'/>
+    <input type="hidden" id="catalog_versions_json" name="catalog_versions_json" value='{{ versions_catalog|tojson }}'/>
+
+    <h2 style="margin-top:0;">Параметры сервиса</h2>
+    <div class="service-bubbles">
+      <section class="service-bubble stack">
+        <h3 style="margin-top:0;">Redmine</h3>
+        <div class="field">
+          <label for="secret_REDMINE_URL">Адрес Redmine</label>
+          <input id="secret_REDMINE_URL" name="secret_REDMINE_URL" type="text" placeholder="https://redmine.company.local"/>
+        </div>
+        <div class="field">
+          <label for="secret_REDMINE_API_KEY">API-ключ Redmine</label>
+          <input id="secret_REDMINE_API_KEY" name="secret_REDMINE_API_KEY" type="text" placeholder="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"/>
+        </div>
+      </section>
+      <section class="service-bubble stack">
+        <h3 style="margin-top:0;">Matrix</h3>
+        <div class="field">
+          <label for="secret_MATRIX_HOMESERVER">Адрес Matrix</label>
+          <input id="secret_MATRIX_HOMESERVER" name="secret_MATRIX_HOMESERVER" type="text" placeholder="https://matrix.company.local"/>
+        </div>
+        <div class="field">
+          <label for="secret_MATRIX_USER_ID">Имя учётной записи</label>
+          <input id="secret_MATRIX_USER_ID" name="secret_MATRIX_USER_ID" type="text" placeholder="@login:ваш.домен" autocomplete="username"/>
+        </div>
+        <div class="field">
+          <label for="secret_MATRIX_ACCESS_TOKEN">Токен</label>
+          <input id="secret_MATRIX_ACCESS_TOKEN" name="secret_MATRIX_ACCESS_TOKEN" type="text" placeholder="syt_xxxxxxxxxxxxxxxxxxx" autocomplete="off"/>
+        </div>
+      </section>
     </div>
-    <div class="card card-nested stack">
-      <h2 style="margin-top:0;">Matrix</h2>
-      <div class="field">
-        <label for="secret_MATRIX_HOMESERVER">Адрес Matrix</label>
-        <input id="secret_MATRIX_HOMESERVER" name="secret_MATRIX_HOMESERVER" type="text" placeholder="https://matrix.company.local"/>
-      </div>
-      <div class="field">
-        <label for="secret_MATRIX_USER_ID">Имя учётной записи</label>
-        <input id="secret_MATRIX_USER_ID" name="secret_MATRIX_USER_ID" type="text" placeholder="@login:ваш.домен" autocomplete="username"/>
-      </div>
-      <div class="field">
-        <label for="secret_MATRIX_ACCESS_TOKEN">Токен</label>
-        <input id="secret_MATRIX_ACCESS_TOKEN" name="secret_MATRIX_ACCESS_TOKEN" type="text" placeholder="syt_xxxxxxxxxxxxxxxxxxx" autocomplete="off"/>
-      </div>
+    <div class="service-actions">
+      <button class="btn btn-primary" type="submit">Сохранить подключения</button>
+      <button class="btn btn-ghost" type="button" id="check-access-btn">Проверить доступ</button>
     </div>
-    <div class="page-actions page-actions--onboarding-submit">
-      <button class="btn btn-primary btn--wide" type="submit">Сохранить и продолжить</button>
+    {% if saved == "connections" %}
+    <p class="muted" style="margin:0.4rem 0 0;">Подключения сохранены.</p>
+    {% endif %}
+    <p id="check-access-status" class="muted" style="margin:0.4rem 0 0;" aria-live="polite"></p>
+
+    <h2 style="margin-top:0.75rem;">Справочник</h2>
+    <p id="catalog-save-status" class="muted" style="margin:0.2rem 0 0.65rem;" aria-live="polite"></p>
+    <div class="catalog-grid">
+      <section class="service-bubble">
+        <h3 style="margin-top:0;">Уведомления</h3>
+        <div class="catalog-list" id="notify-list"></div>
+        <div class="catalog-add">
+          <input id="notify-add-input" type="text" placeholder="Новое уведомление"/>
+          <button type="button" class="btn btn-ghost btn-small" id="notify-add">Добавить</button>
+        </div>
+      </section>
+      <section class="service-bubble">
+        <h3 style="margin-top:0;">Версии</h3>
+        <div class="catalog-list" id="versions-list"></div>
+        <div class="catalog-add">
+          <input id="versions-add-input" type="text" placeholder="Новая версия"/>
+          <button type="button" class="btn btn-ghost btn-small" id="versions-add">Добавить</button>
+        </div>
+      </section>
     </div>
   </form>
 </div>
+</div>
+
+<script>
+(function () {
+  var form = document.getElementById("settings-form");
+  var catalogStatus = document.getElementById("catalog-save-status");
+  var persistTimer = null;
+
+  async function persistCatalog() {
+    var fd = new FormData();
+    var csrf = form ? form.querySelector('input[name="csrf_token"]') : null;
+    fd.append("csrf_token", csrf ? csrf.value : "");
+    fd.append("catalog_notify_json", document.getElementById("catalog_notify_json").value || "[]");
+    fd.append("catalog_versions_json", document.getElementById("catalog_versions_json").value || "[]");
+    if (catalogStatus) catalogStatus.textContent = "Сохранение справочника...";
+    try {
+      var resp = await fetch("/onboarding/catalog/save", {
+        method: "POST",
+        body: fd,
+        credentials: "same-origin",
+        headers: { Accept: "application/json" }
+      });
+      if (!resp.ok) throw new Error("catalog_save_failed");
+      if (catalogStatus) catalogStatus.textContent = "Справочник сохранен.";
+    } catch (e) {
+      if (catalogStatus) catalogStatus.textContent = "Ошибка сохранения справочника.";
+    }
+  }
+
+  function queuePersist() {
+    if (persistTimer) window.clearTimeout(persistTimer);
+    persistTimer = window.setTimeout(persistCatalog, 400);
+  }
+
+  function asJsonSafe(value, fallback) {
+    try {
+      var parsed = JSON.parse(value || "");
+      return Array.isArray(parsed) ? parsed : fallback;
+    } catch (e) {
+      return fallback;
+    }
+  }
+  function slugify(label, used) {
+    var base = String(label || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+    if (!base) base = "opt";
+    var key = base;
+    var i = 2;
+    while (used.has(key)) {
+      key = base + "_" + i;
+      i += 1;
+    }
+    return key;
+  }
+  function createCatalogEditor(cfg) {
+    var container = document.getElementById(cfg.listId);
+    var addInput = document.getElementById(cfg.addInputId);
+    var addBtn = document.getElementById(cfg.addBtnId);
+    var hidden = document.getElementById(cfg.hiddenId);
+    if (!container || !addInput || !addBtn || !hidden) return;
+    var list = asJsonSafe(hidden.value, []);
+    var dragIndex = -1;
+    var pendingDeleteIndex = -1;
+    var editIndex = -1;
+    var editValue = "";
+
+    function readLabel(item) {
+      return cfg.kind === "notify" ? String((item || {}).label || "") : String(item || "");
+    }
+    function writeItem(label, prev) {
+      if (cfg.kind === "notify") {
+        var used = new Set(list.map(function (it) { return String((it || {}).key || ""); }));
+        if (prev && prev.key) used.delete(prev.key);
+        return { key: (prev && prev.key) || slugify(label, used), label: label };
+      }
+      return label;
+    }
+    function sync(shouldPersist) {
+      hidden.value = JSON.stringify(list);
+      render();
+      if (shouldPersist) queuePersist();
+    }
+    function commitAdd() {
+      var value = String(addInput.value || "").trim();
+      if (!value) return;
+      list.push(writeItem(value, null));
+      addInput.value = "";
+      sync(true);
+    }
+    function render() {
+      container.innerHTML = "";
+      list.forEach(function (item, index) {
+        var label = readLabel(item);
+        var row = document.createElement("div");
+        row.className = "catalog-item";
+        row.draggable = true;
+
+        var content = document.createElement("div");
+        content.className = "catalog-item__content";
+        if (editIndex === index) {
+          var editInput = document.createElement("input");
+          editInput.type = "text";
+          editInput.className = "catalog-item__input";
+          editInput.value = editValue || label;
+          editInput.addEventListener("input", function () {
+            editValue = editInput.value;
+          });
+          editInput.addEventListener("keydown", function (e) {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              saveEdit(index, item);
+            } else if (e.key === "Escape") {
+              e.preventDefault();
+              cancelEdit();
+            }
+          });
+          content.appendChild(editInput);
+          requestAnimationFrame(function () { editInput.focus(); editInput.select(); });
+        } else {
+          var text = document.createElement("span");
+          text.className = "catalog-item__text";
+          text.textContent = label;
+          content.appendChild(text);
+        }
+
+        var actions = document.createElement("div");
+        actions.className = "catalog-item__actions";
+        if (editIndex === index) {
+          actions.innerHTML = '<button type="button" class="btn btn-primary btn-small">Сохранить</button><button type="button" class="btn btn-ghost btn-small">Отмена</button>';
+          actions.children[0].addEventListener("click", function () { saveEdit(index, item); });
+          actions.children[1].addEventListener("click", cancelEdit);
+        } else if (pendingDeleteIndex === index) {
+          actions.innerHTML = '<button type="button" class="btn btn-danger btn-small">Удалить?</button><button type="button" class="btn btn-ghost btn-small">Отмена</button>';
+          actions.children[0].addEventListener("click", function () {
+            list.splice(index, 1);
+            pendingDeleteIndex = -1;
+            sync(true);
+          });
+          actions.children[1].addEventListener("click", function () {
+            pendingDeleteIndex = -1;
+            render();
+          });
+        } else {
+          actions.innerHTML = '<button type="button" class="btn btn-ghost btn-small" title="Редактировать">✎</button><button type="button" class="btn btn-danger btn-small" title="Удалить">✕</button>';
+          actions.children[0].addEventListener("click", function () {
+            pendingDeleteIndex = -1;
+            editIndex = index;
+            editValue = label;
+            render();
+          });
+          actions.children[1].addEventListener("click", function () {
+            editIndex = -1;
+            pendingDeleteIndex = index;
+            render();
+          });
+        }
+
+        row.appendChild(content);
+        row.appendChild(actions);
+        row.addEventListener("dragstart", function () {
+          dragIndex = index;
+          row.classList.add("is-drag");
+        });
+        row.addEventListener("dragend", function () {
+          row.classList.remove("is-drag");
+          dragIndex = -1;
+        });
+        row.addEventListener("dragover", function (e) { e.preventDefault(); });
+        row.addEventListener("drop", function (e) {
+          e.preventDefault();
+          if (dragIndex < 0 || dragIndex >= list.length || dragIndex === index) return;
+          var moved = list.splice(dragIndex, 1)[0];
+          list.splice(index, 0, moved);
+          pendingDeleteIndex = -1;
+          editIndex = -1;
+          sync(true);
+        });
+        container.appendChild(row);
+      });
+    }
+    function saveEdit(index, prevItem) {
+      var next = String(editValue || "").trim();
+      if (!next) return;
+      list[index] = writeItem(next, prevItem);
+      editIndex = -1;
+      editValue = "";
+      sync(true);
+    }
+    function cancelEdit() {
+      editIndex = -1;
+      editValue = "";
+      render();
+    }
+    addBtn.addEventListener("click", commitAdd);
+    addInput.addEventListener("keydown", function (e) {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        commitAdd();
+      }
+    });
+    sync(false);
+  }
+  createCatalogEditor({
+    kind: "notify",
+    listId: "notify-list",
+    addInputId: "notify-add-input",
+    addBtnId: "notify-add",
+    hiddenId: "catalog_notify_json"
+  });
+  createCatalogEditor({
+    kind: "simple",
+    listId: "versions-list",
+    addInputId: "versions-add-input",
+    addBtnId: "versions-add",
+    hiddenId: "catalog_versions_json"
+  });
+
+  (function () {
+    var btn = document.getElementById("check-access-btn");
+    var form = document.getElementById("settings-form");
+    var status = document.getElementById("check-access-status");
+    if (!btn || !form || !status) return;
+    btn.addEventListener("click", async function () {
+      status.textContent = "Проверка...";
+      btn.disabled = true;
+      try {
+        var fd = new FormData(form);
+        var resp = await fetch("/onboarding/check", {
+          method: "POST",
+          body: fd,
+          credentials: "same-origin",
+          headers: { Accept: "application/json" },
+        });
+        var data = await resp.json().catch(function () { return {}; });
+        if (!resp.ok || !Array.isArray(data.checks)) {
+          status.textContent = "Не удалось выполнить проверку.";
+          return;
+        }
+        var lines = data.checks.map(function (item) {
+          return (item && item.message) ? String(item.message) : "";
+        }).filter(Boolean);
+        status.textContent = lines.join(" ");
+      } catch (e) {
+        status.textContent = "Ошибка сети при проверке.";
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  })();
+})();
+</script>
 {% endblock %}

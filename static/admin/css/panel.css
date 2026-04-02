@@ -434,6 +434,15 @@ input[type="radio"] {
   width: 1.125rem;
   height: 1.125rem;
 }
+/* Поле Redmine user ID: без браузерного спиннера */
+#redmine_id {
+  -moz-appearance: textfield;
+}
+#redmine_id::-webkit-outer-spin-button,
+#redmine_id::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
 input[type="checkbox"] {
   width: 1.05rem;
   height: 1.05rem;
@@ -687,6 +696,15 @@ a.stat-card--link:focus-visible {
   min-height: 7.35rem;
   padding-top: 1.4rem;
 }
+.grid-stats > a.stat-card--link.stat-card--no-value {
+  min-height: 5.3rem;
+  padding-top: 1rem;
+  display: flex;
+  align-items: center;
+}
+.stat-card--no-value .stat-label {
+  margin: 0;
+}
 /* Дашборд: две колонки как в ui_demo_balanced_other_pages.html */
 .demo-grid {
   display: grid;
@@ -749,9 +767,11 @@ a.stat-card--link:focus-visible {
   max-width: 26rem;
 }
 .field-switch {
-  justify-content: flex-end;
-  align-self: end;
-  padding-bottom: 0.2rem;
+  display: flex;
+  align-items: stretch;
+  align-self: stretch;
+  padding-top: 1.9rem;
+  padding-bottom: 0;
 }
 .switch {
   display: inline-flex;
@@ -760,6 +780,15 @@ a.stat-card--link:focus-visible {
   cursor: pointer;
   user-select: none;
   margin-top: 0.2rem;
+}
+.field-switch .switch {
+  width: 100%;
+  min-height: 3.15rem;
+  padding: 0.62rem 0.82rem;
+  border-radius: 0.75rem;
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.15);
+  margin-top: 0;
 }
 .switch input[type="checkbox"] {
   position: absolute;
@@ -810,7 +839,7 @@ a.stat-card--link:focus-visible {
 }
 .user-form-summary .summary-line {
   display: flex;
-  align-items: baseline;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 0.75rem;
   border-bottom: 1px dashed var(--border);
@@ -819,11 +848,14 @@ a.stat-card--link:focus-visible {
 }
 .user-form-summary .summary-line .k {
   color: var(--muted);
+  flex: 0 0 auto;
 }
 .user-form-summary .summary-line .v {
   color: var(--fg);
   font-weight: 500;
   text-align: right;
+  max-width: 16rem;
+  overflow-wrap: anywhere;
 }
 @media (max-width: 1020px) {
   .user-form-layout {
@@ -836,8 +868,8 @@ a.stat-card--link:focus-visible {
     max-width: none;
   }
   .field-switch {
-    justify-content: flex-start;
     align-self: auto;
+    padding-top: 0;
     padding-bottom: 0;
   }
 }
@@ -1039,7 +1071,8 @@ fieldset.settings-fieldset > legend {
   user-select: none;
 }
 /* Перекрываем глобальные размеры чекбокса — иначе «пилюля» ломается */
-.day-pill .day-pill__input[type="checkbox"] {
+.day-pill .day-pill__input[type="checkbox"],
+.day-pill .day-pill__input[type="radio"] {
   position: absolute;
   left: 0;
   top: 0;
@@ -1069,6 +1102,17 @@ fieldset.settings-fieldset > legend {
 .day-pill__input:checked + .day-pill__text {
   border-color: var(--choice-active-border);
   background: var(--choice-active-bg);
+  color: var(--fg);
+}
+.form-pill .day-pill__text {
+  min-width: 0;
+  padding-left: 0.75rem;
+  padding-right: 0.75rem;
+}
+.section-subtitle {
+  margin: 0.8rem 0 0.45rem;
+  font-size: 1rem;
+  font-weight: 600;
   color: var(--fg);
 }
 
@@ -1209,4 +1253,175 @@ pre.log-tail.muted {
 }
 .service-errors-hint {
   font-size: 0.9em;
+}
+
+/* Settings: service cards + catalog */
+.settings-root {
+  max-width: min(92rem, 100%);
+  margin-left: auto;
+  margin-right: auto;
+}
+.page-settings--wide {
+  max-width: min(92rem, 100%);
+  margin-left: auto;
+  margin-right: auto;
+}
+.service-bubbles {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.1rem;
+  align-items: stretch;
+}
+.service-bubble {
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  background: var(--glass);
+  padding: 1rem 1rem 1.05rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  min-height: 100%;
+}
+.service-bubble h3 {
+  margin-bottom: 0.15rem;
+  font-size: 1.06rem;
+  font-weight: 600;
+}
+.service-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.65rem;
+  margin-top: 0.35rem;
+  align-items: center;
+}
+.catalog-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.1rem;
+  align-items: start;
+}
+.catalog-grid .service-bubble {
+  min-height: 0;
+  padding-top: 0.65rem;
+  padding-bottom: 0.65rem;
+}
+.catalog-list {
+  display: grid;
+  gap: 0.55rem;
+  min-height: 1.4rem;
+  margin-bottom: 0.45rem;
+}
+.catalog-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding: 0.55rem 0.65rem;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+  cursor: grab;
+  transition: border-color 0.15s, background 0.15s;
+}
+.catalog-item.is-drag {
+  opacity: 0.55;
+}
+.catalog-item:hover {
+  border-color: rgba(6, 182, 212, 0.35);
+  background: rgba(6, 182, 212, 0.08);
+}
+.catalog-item__content {
+  min-width: 0;
+}
+.catalog-item__text {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.catalog-item__actions {
+  display: inline-flex;
+  gap: 0.3rem;
+}
+.catalog-item__input {
+  width: 100%;
+  min-width: 0;
+}
+.catalog-add {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.5rem;
+  align-items: center;
+}
+.catalog-add input {
+  min-width: 0;
+}
+.save-modal {
+  position: fixed;
+  z-index: 120;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(28rem, calc(100vw - 2rem));
+  padding: 1rem;
+  border-radius: 0.95rem;
+  border: 1px solid var(--border);
+  background: #111827;
+  box-shadow: 0 24px 56px rgba(0, 0, 0, 0.5);
+}
+.save-modal .page-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.55rem;
+}
+.save-modal .page-actions .btn {
+  width: 100%;
+  justify-content: center;
+}
+#check-access-status:empty,
+#catalog-save-status:empty {
+  display: none;
+}
+.btn-small {
+  min-height: 2rem;
+  padding: 0.35rem 0.62rem;
+  font-size: 0.85rem;
+}
+.chip-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.choice--chip {
+  margin: 0;
+}
+.choice--chip input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+.choice--chip span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2rem;
+  padding: 0.35rem 0.7rem;
+  border-radius: 999px;
+  background: var(--choice-surface);
+  border: 1px solid var(--choice-border);
+  transition: background 0.15s, border-color 0.15s;
+}
+.choice--chip input:checked + span {
+  background: var(--choice-active-bg);
+  border-color: var(--choice-active-border);
+}
+@media (max-width: 920px) {
+  .service-bubbles,
+  .catalog-grid {
+    grid-template-columns: 1fr;
+  }
+  .service-actions {
+    justify-content: stretch;
+    flex-direction: column;
+    align-items: stretch;
+  }
 }

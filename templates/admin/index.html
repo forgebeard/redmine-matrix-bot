@@ -33,9 +33,8 @@
     <div class="stat-value">{{ dash.group_count }}</div>
     <i class="fa-solid fa-layer-group stat-icon" aria-hidden="true"></i>
   </a>
-  <a class="card stat-card stat-card--link" href="/events" aria-label="События: строк в хвосте лога {{ dash.events_tail_lines }}" title="Число непустых строк в последних ~400 строках файла лога (ADMIN_EVENTS_LOG_PATH)">
+  <a class="card stat-card stat-card--link stat-card--no-value" href="/events" aria-label="События" title="Открыть журнал событий">
     <div class="stat-label">События</div>
-    <div class="stat-value">{{ dash.events_tail_lines }}</div>
     <i class="fa-solid fa-bolt stat-icon" aria-hidden="true"></i>
   </a>
 </div>
@@ -76,7 +75,6 @@
     {% include "partials/service_metrics.html" %}
     </div>
     <div class="service-actions-panel" aria-label="Управление ботом">
-      <div class="service-actions-title">Управление</div>
       <div class="service-actions-grid">
         <form method="post" action="/ops/bot/start">
           <input type="hidden" name="csrf_token" value="{{ request.state._state.get('csrf_token', '') }}"/>
