@@ -253,6 +253,7 @@ def _append_ops_to_events_log(message: str) -> None:
     Дублирует операции Docker из панели в файл «Событий» (по умолчанию data/bot.log),
     чтобы страница /events показывала то же, что видит админ в UI (лог бота при этом не заменяется).
     """
+    path: Path | None = None
     try:
         path = _admin_events_log_path()
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -261,8 +262,13 @@ def _append_ops_to_events_log(message: str) -> None:
         safe = (message or "").replace("\n", " ").replace("\r", " ").strip()[:800]
         with path.open("a", encoding="utf-8") as f:
             f.write(f"{ts} [ADMIN] {safe}\n")
-    except OSError:
-        logger.debug("append ops to events log failed", exc_info=True)
+    except OSError as e:
+        logger.warning(
+            "Не удалось дописать строку [ADMIN] в лог событий %s: %s",
+            path or "(unknown)",
+            e,
+            exc_info=True,
+        )
 
 
 def _dash_events_tail_line_count(*, max_lines: int = 400) -> int:
@@ -363,9 +369,9 @@ def _group_display_name(groups_by_id: dict, group_id: int | None) -> str:
 
 
 _OPS_FLASH_MESSAGES: dict[str, str] = {
-    "stop_ok": "Команда остановки контейнера бота отправлена в Docker.",
+    "stop_ok": "Docker принял остановку контейнера бота (или контейнер уже был остановлен). Счётчик «uptime панели» на дашборде — это работа веб-админки, а не бота.",
     "stop_error": "Не удалось остановить бот. Проверьте DOCKER_HOST, docker-socket-proxy и имя сервиса (DOCKER_TARGET_SERVICE, метки compose).",
-    "start_ok": "Команда запуска контейнера бота отправлена в Docker.",
+    "start_ok": "Docker принял запуск контейнера бота (или он уже был запущен). Счётчик uptime на карточке — у веб-панели admin, не процесса бота.",
     "start_error": "Не удалось запустить бот. Проверьте Docker и настройки.",
     "restart_accepted": "Перезапуск бота запланирован (команда уходит в фоне).",
     "ops_commit_error": "Не удалось сохранить запись в журнал операций (БД). Состояние Docker смотрите в выводе compose / на дашборде.",
@@ -1106,13 +1112,17 @@ async def dash_service_strip(request: Request):
     uptime_s = int(time.monotonic() - _process_started_at)
     svc = html_escape(str(runtime_docker.get("service", "bot")))
     st = html_escape(str(runtime_docker.get("state", "unknown")))
+    cname = runtime_docker.get("container_name") or ""
+    cname_html = f' <span class="muted">({html_escape(cname)})</span>' if cname else ""
     cycle = runtime_file or {}
     last_at = html_escape(str(cycle.get("last_cycle_at") or "—"))
     dur = html_escape(str(cycle.get("last_cycle_duration_s") or "—"))
     err_n = html_escape(str(cycle.get("error_count") or 0))
     html = (
-        f'<p class="muted">Процесс uptime: <strong>{uptime_s}с</strong>, '
-        f'Docker service: <strong>{svc}</strong>, state: <strong>{st}</strong>.</p>'
+        '<p class="muted">Uptime <strong>веб-панели</strong> (процесс admin): '
+        f"<strong>{uptime_s}с</strong> — растёт, пока работает контейнер админки; кнопки Start/Stop "
+        f"управляют <strong>контейнером бота</strong> в Docker, не этой панелью.</p>"
+        f"<p class=\"muted\">Бот (compose-сервис <strong>{svc}</strong>): состояние <strong>{st}</strong>{cname_html}.</p>"
         f'<p class="muted">Последний цикл: {last_at}; длительность: {dur}с; ошибок: {err_n}.</p>'
     )
     return HTMLResponse(html)
@@ -1211,9 +1221,14 @@ async def bot_ops_action(
         await session.rollback()
         return RedirectResponse("/?ops=ops_commit_error", status_code=303)
     if action in ("start", "stop"):
-        if ops_q == f"{action}_ok" and res_ok:
-            cid = str(res_ok.get("container_id") or "")
-            _append_ops_to_events_log(f"Docker bot/{action} ok by={actor} container_id={cid[:20]}")
+        if ops_q == f"{action}_ok":
+            r = res_ok or {}
+            cid = str(r.get("container_id") or "")
+            http_st = r.get("docker_http_status")
+            http_part = f" http_status={http_st}" if http_st is not None else ""
+            _append_ops_to_events_log(
+                f"Docker bot/{action} ok by={actor} container_id={cid[:20]}{http_part}"
+            )
         elif ops_q == f"{action}_error":
             _append_ops_to_events_log(
                 f"Docker bot/{action} failed by={actor}: {_truncate_ops_detail(ops_detail_err or 'unknown', 400)}"

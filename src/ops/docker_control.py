@@ -160,15 +160,23 @@ def _find_target_container_id() -> str | None:
 def get_service_status() -> dict[str, Any]:
     cid = _find_target_container_id()
     if not cid:
-        return {"service": _service_name(), "state": "not_found"}
+        return {"service": _service_name(), "state": "not_found", "container_name": ""}
     _, payload = _docker_request("GET", f"/containers/{cid}/json")
     state = "unknown"
     running = False
+    name = ""
     if isinstance(payload, dict):
         st = payload.get("State") or {}
         running = bool(st.get("Running"))
         state = "running" if running else "stopped"
-    return {"service": _service_name(), "state": state, "running": running, "container_id": cid}
+        name = str(payload.get("Name") or "").lstrip("/")
+    return {
+        "service": _service_name(),
+        "state": state,
+        "running": running,
+        "container_id": cid,
+        "container_name": name,
+    }
 
 
 def control_service(action: str) -> dict[str, Any]:
@@ -184,5 +192,10 @@ def control_service(action: str) -> dict[str, Any]:
             + " Либо задайте DOCKER_TARGET_CONTAINER_SUBSTRING (уникальная подстрока в docker ps --format '{{{{.Names}}}}')."
         )
         raise DockerControlError(hint)
-    _docker_request("POST", f"/containers/{cid}/{action}")
-    return {"service": _service_name(), "action": action, "container_id": cid}
+    http_status, _ = _docker_request("POST", f"/containers/{cid}/{action}")
+    return {
+        "service": _service_name(),
+        "action": action,
+        "container_id": cid,
+        "docker_http_status": http_status,
+    }

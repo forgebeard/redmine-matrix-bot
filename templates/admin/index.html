@@ -64,10 +64,14 @@
          hx-get="/dash/service-strip"
          hx-trigger="load, every 10s"
          hx-swap="innerHTML">
+    {% set d = runtime_status.docker %}
     <p class="muted">
-      Процесс uptime: <strong>{{ runtime_status.uptime_s }}с</strong>,
-      Docker service: <strong>{{ runtime_status.docker.service }}</strong>,
-      state: <strong>{{ runtime_status.docker.state }}</strong>.
+      Uptime <strong>веб-панели</strong> (admin): <strong>{{ runtime_status.uptime_s }}с</strong>
+      — растёт, пока работает контейнер админки; Start/Stop относятся к <strong>контейнеру бота</strong> в Docker.
+    </p>
+    <p class="muted">
+      Бот (сервис <strong>{{ d.service }}</strong>): <strong>{{ d.state }}</strong>
+      {% if d.container_name %}<span class="muted">({{ d.container_name }})</span>{% endif %}.
     </p>
     <p class="muted">
       Последний цикл: {{ cycle.last_cycle_at or "—" }}; длительность: {{ cycle.last_cycle_duration_s or "—" }}с;

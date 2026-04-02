@@ -57,6 +57,7 @@ def test_stop_accepts_http_304_already_stopped(monkeypatch):
     out = docker_control.control_service("stop")
     assert out["action"] == "stop"
     assert out["container_id"] == "abc123"
+    assert out["docker_http_status"] == 304
 
 
 def test_get_service_status_running(monkeypatch):
@@ -68,13 +69,14 @@ def test_get_service_status_running(monkeypatch):
         if "/containers/json?" in url:
             return _Resp(200, json.dumps([{"Id": "abc123"}]))
         if "/containers/abc123/json" in url:
-            return _Resp(200, json.dumps({"State": {"Running": True}}))
+            return _Resp(200, json.dumps({"State": {"Running": True}, "Name": "/proj-bot-1"}))
         raise AssertionError(url)
 
     monkeypatch.setattr(docker_control, "urlopen", fake_open)
     st = docker_control.get_service_status()
     assert st["state"] == "running"
     assert st["container_id"] == "abc123"
+    assert st["container_name"] == "proj-bot-1"
 
 
 def test_find_container_falls_back_when_compose_project_wrong(monkeypatch):
@@ -97,6 +99,7 @@ def test_find_container_falls_back_when_compose_project_wrong(monkeypatch):
     out = docker_control.control_service("stop")
     assert out["container_id"] == "fallback-id"
     assert out["action"] == "stop"
+    assert out["docker_http_status"] == 204
 
 
 def test_control_service_not_found_message(monkeypatch):

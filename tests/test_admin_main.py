@@ -99,7 +99,7 @@ def test_dash_service_strip_for_admin(client: TestClient, monkeypatch):
     )
     r = client.get("/dash/service-strip")
     assert r.status_code == 200
-    assert "Процесс uptime" in r.text
+    assert "веб-панели" in r.text
     assert "running" in r.text
 
 
