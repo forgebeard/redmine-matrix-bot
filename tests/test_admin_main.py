@@ -440,5 +440,5 @@ def test_ops_restart_accepts_and_redirects(client: TestClient, monkeypatch):
     token = client.cookies.get("admin_csrf")
     r = client.post("/ops/bot/restart", data={"csrf_token": token}, follow_redirects=False)
     assert r.status_code in (302, 303)
-    assert re.search(r"/\?ops=restart_accepted$", r.headers.get("location", ""))
+    assert r.headers.get("location") == "/dashboard?ops=restart_accepted"
 

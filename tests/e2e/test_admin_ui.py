@@ -44,10 +44,8 @@ def test_login_reaches_shell_after_auth(
     page.get_by_label("Логин").fill(login)
     page.get_by_label("Пароль", exact=True).fill(password)
     page.get_by_role("button", name="Войти").click()
-    # После входа — дашборд или мастер интеграций
-    shell = page.get_by_role("heading", name="Дашборд").or_(
-        page.get_by_role("heading", name="Настройки подключений")
-    )
+    # После входа — дашборд (URL обычно /dashboard)
+    shell = page.get_by_role("heading", name="Дашборд")
     expect(shell).to_be_visible(timeout=15_000)
 
 

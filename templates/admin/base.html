@@ -33,7 +33,7 @@
     </div>
     <nav class="sidebar-nav">
       <div class="sidebar-nav-main">
-        <a class="nav-link {% if _path == '/' %}active{% endif %}" href="/"><i class="fa-solid fa-gauge-high"></i><span>Дашборд</span></a>
+        <a class="nav-link {% if _path == '/' or _path == dashboard_path %}active{% endif %}" href="{{ dashboard_path }}"><i class="fa-solid fa-gauge-high"></i><span>Дашборд</span></a>
         <a class="nav-link {% if _path.startswith('/groups') %}active{% endif %}" href="/groups"><i class="fa-solid fa-layer-group"></i><span>Группы</span></a>
         <a class="nav-link {% if _path.startswith('/users') %}active{% endif %}" href="/users"><i class="fa-solid fa-users"></i><span>Пользователи</span></a>
         <a class="nav-link {% if _path.startswith('/onboarding') or _path.startswith('/secrets') %}active{% endif %}" href="/onboarding"><i class="fa-solid fa-gear"></i><span>Настройки подключений</span></a>

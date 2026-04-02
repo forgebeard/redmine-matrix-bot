@@ -135,6 +135,8 @@ SESSION_COOKIE_NAME = os.getenv("ADMIN_SESSION_COOKIE", "admin_session")
 CSRF_COOKIE_NAME = os.getenv("ADMIN_CSRF_COOKIE", "admin_csrf")
 COOKIE_SECURE = os.getenv("COOKIE_SECURE", "0").strip().lower() in ("1", "true", "yes", "on")
 SETUP_PATH = "/setup"
+# Путь дашборда в адресной строке (корень `/` отдаёт тот же экран без редиректа).
+DASHBOARD_PATH = "/dashboard"
 SESSION_IDLE_TIMEOUT_SECONDS = int(os.getenv("ADMIN_SESSION_IDLE_TIMEOUT", "1800"))
 RUNTIME_STATUS_FILE = os.getenv("BOT_RUNTIME_STATUS_FILE", "/app/data/runtime_status.json")
 # Системная строка в support_groups (миграции); в UI не показываем как обычную группу.
@@ -147,6 +149,7 @@ GROUP_USERS_FILTER_ALL_LABEL = "Все группы"
 _jinja_env.globals["GROUP_UNASSIGNED_NAME"] = GROUP_UNASSIGNED_NAME
 _jinja_env.globals["GROUP_UNASSIGNED_DISPLAY"] = GROUP_UNASSIGNED_DISPLAY
 _jinja_env.globals["GROUP_USERS_FILTER_ALL_LABEL"] = GROUP_USERS_FILTER_ALL_LABEL
+_jinja_env.globals["dashboard_path"] = DASHBOARD_PATH
 
 AUTH_TOKEN_SALT = os.getenv("AUTH_TOKEN_SALT", "dev-token-salt")
 SESSION_TTL_SECONDS = int(os.getenv("SESSION_TTL_SECONDS", "86400"))
@@ -880,9 +883,8 @@ async def login_post(
     )
     session.add(st)
     await session.flush()
-    integration_status = await _integration_status(session, use_cache=False)
-    next_url = "/onboarding" if (not integration_status["configured"] and not integration_status["skipped"]) else "/"
-    resp = RedirectResponse(next_url, status_code=303)
+    # Дашборд по умолчанию; незаполненные секреты видны в баннере и на «Настройки подключений».
+    resp = RedirectResponse(DASHBOARD_PATH, status_code=303)
     resp.set_cookie(
         SESSION_COOKIE_NAME,
         str(st.session_token),
@@ -946,7 +948,7 @@ async def onboarding_save(
     # onboarding is complete once values were submitted; remove skip marker.
     await session.execute(delete(AppSecret).where(AppSecret.name == ONBOARDING_SKIPPED_SECRET))
     _integration_status_cache.invalidate()
-    return RedirectResponse("/", status_code=303)
+    return RedirectResponse(DASHBOARD_PATH, status_code=303)
 
 
 @app.post("/onboarding/skip")
@@ -966,7 +968,7 @@ async def onboarding_skip(
         enc = encrypt_secret("1", key=key)
         session.add(AppSecret(name=ONBOARDING_SKIPPED_SECRET, ciphertext=enc.ciphertext, nonce=enc.nonce, key_version=enc.key_version))
     _integration_status_cache.invalidate()
-    return RedirectResponse("/", status_code=303)
+    return RedirectResponse(DASHBOARD_PATH, status_code=303)
 
 
 @app.get("/forgot-password")
@@ -1065,11 +1067,7 @@ async def logout(request: Request, session: AsyncSession = Depends(get_session))
     return resp
 
 
-@app.get("/", response_class=HTMLResponse)
-async def index(
-    request: Request,
-    session: AsyncSession = Depends(get_session),
-):
+async def _dashboard_page(request: Request, session: AsyncSession):
     user = getattr(request.state, "current_user", None)
     if not user or getattr(user, "role", "") != "admin":
         raise HTTPException(403, "Только admin")
@@ -1105,6 +1103,22 @@ async def index(
             "ops_flash": ops_flash,
         },
     )
+
+
+@app.get("/", response_class=HTMLResponse)
+async def index(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+):
+    return await _dashboard_page(request, session)
+
+
+@app.get(DASHBOARD_PATH, response_class=HTMLResponse)
+async def dashboard(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+):
+    return await _dashboard_page(request, session)
 
 
 @app.get("/dash/service-strip", response_class=HTMLResponse)
@@ -1183,7 +1197,7 @@ async def bot_ops_action(
         await session.commit()
         _append_ops_to_events_log(f"Docker bot/restart scheduled by={actor}")
         _restart_in_background(actor)
-        return RedirectResponse("/?ops=restart_accepted", status_code=303)
+        return RedirectResponse(f"{DASHBOARD_PATH}?ops=restart_accepted", status_code=303)
 
     ops_q = f"{action}_error"
     ops_detail_err: str | None = None
@@ -1223,7 +1237,7 @@ async def bot_ops_action(
     except Exception:
         logger.exception("bot_ops commit failed action=%s", action)
         await session.rollback()
-        return RedirectResponse("/?ops=ops_commit_error", status_code=303)
+        return RedirectResponse(f"{DASHBOARD_PATH}?ops=ops_commit_error", status_code=303)
     if action in ("start", "stop"):
         if ops_q == f"{action}_ok":
             r = res_ok or {}
@@ -1240,7 +1254,7 @@ async def bot_ops_action(
     q: dict[str, str] = {"ops": ops_q}
     if ops_detail_err and ops_q.endswith("_error"):
         q["ops_detail"] = _truncate_ops_detail(ops_detail_err)
-    return RedirectResponse("/?" + urlencode(q), status_code=303)
+    return RedirectResponse(DASHBOARD_PATH + "?" + urlencode(q), status_code=303)
 
 
 @app.get("/secrets", response_class=HTMLResponse)
@@ -2418,7 +2432,7 @@ async def me_settings_get(
     if not user:
         return RedirectResponse("/login", status_code=303)
     if getattr(user, "role", "") == "admin":
-        return RedirectResponse("/", status_code=303)
+        return RedirectResponse(DASHBOARD_PATH, status_code=303)
 
     redmine_id = getattr(user, "redmine_id", None)
     csrf_token, set_cookie = _ensure_csrf(request)
@@ -2504,7 +2518,7 @@ async def me_settings_post(
     if not user:
         return RedirectResponse("/login", status_code=303)
     if getattr(user, "role", "") == "admin":
-        return RedirectResponse("/", status_code=303)
+        return RedirectResponse(DASHBOARD_PATH, status_code=303)
 
     redmine_id = getattr(user, "redmine_id", None)
     if redmine_id is None:
