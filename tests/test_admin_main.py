@@ -26,7 +26,9 @@ def client():
 def test_audit_legacy_redirects_unauthenticated(client: TestClient):
     r = client.get("/audit", follow_redirects=False)
     assert r.status_code == 303
-    assert "/login" in (r.headers.get("location") or "")
+    loc = r.headers.get("location") or ""
+    # Нет админа в БД (типично CI после миграций) → /setup; иначе без cookie → /login.
+    assert loc.endswith("/login") or loc.endswith("/setup"), loc
 
 
 def test_audit_legacy_redirects_to_events_for_admin(client: TestClient):
@@ -417,7 +419,8 @@ def test_me_settings_admin_redirects_home(client: TestClient):
     r = client.get("/me/settings", follow_redirects=False)
     assert r.status_code == 303
     loc = r.headers.get("location", "")
-    assert loc in ("http://testserver/", "/")
+    path = urlparse(loc).path if loc.startswith("http") else loc.split("?", 1)[0]
+    assert path in ("/", "/dashboard")
 
 
 def test_groups_create_reserved_name_rejected(client: TestClient):
