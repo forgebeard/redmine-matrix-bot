@@ -11,7 +11,13 @@
     <input type="hidden" id="catalog_notify_json" name="catalog_notify_json" value='{{ notify_catalog|tojson }}'/>
     <input type="hidden" id="catalog_versions_json" name="catalog_versions_json" value='{{ versions_catalog|tojson }}'/>
 
-    <h2 style="margin-top:0;">Параметры сервиса</h2>
+    <div class="settings-head-row">
+      <h2 style="margin-top:0;">Параметры сервиса</h2>
+      <div class="service-actions service-actions--head">
+        <button class="btn btn-primary" type="submit">Сохранить</button>
+        <button class="btn btn-ghost" type="button" id="check-access-btn">Проверить доступ</button>
+      </div>
+    </div>
     <div class="service-bubbles">
       <section class="service-bubble stack">
         <h3 style="margin-top:0;">Redmine</h3>
@@ -40,10 +46,22 @@
         </div>
       </section>
     </div>
-    <div class="service-actions">
-      <button class="btn btn-primary" type="submit">Сохранить подключения</button>
-      <button class="btn btn-ghost" type="button" id="check-access-btn">Проверить доступ</button>
-    </div>
+
+    <h2 style="margin-top:0.75rem;">Таймзона сервиса</h2>
+    <section class="service-bubble stack service-timezone-block">
+      <div class="field">
+        <label for="service_timezone">Таймзона сервиса</label>
+        <select id="service_timezone" name="service_timezone">
+          {% if service_timezone and service_timezone not in timezone_all_options %}
+          <option value="{{ service_timezone }}" selected>{{ timezone_labels.get(service_timezone, service_timezone) }}</option>
+          {% endif %}
+          {% for tz_name in timezone_all_options %}
+          <option value="{{ tz_name }}" {% if tz_name == service_timezone %}selected{% endif %}>{{ timezone_labels.get(tz_name, tz_name) }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </section>
+
     {% if saved == "connections" %}
     <p class="muted" style="margin:0.4rem 0 0;">Подключения сохранены.</p>
     {% endif %}

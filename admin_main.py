@@ -115,6 +115,14 @@ async def _app_lifespan(_app: FastAPI):
         load_master_key()
     except SecurityError as e:
         raise RuntimeError(f"startup failed: {e}") from e
+    # Service timezone can be configured in onboarding and persisted as secret.
+    try:
+        factory = get_session_factory()
+        async with factory() as session:
+            tz_saved = await _load_secret_plain(session, SERVICE_TIMEZONE_SECRET)
+        os.environ["BOT_TIMEZONE"] = _normalize_service_timezone_name(tz_saved)
+    except Exception:
+        logger.warning("service_timezone_load_failed", exc_info=True)
     yield
 
 
@@ -192,6 +200,7 @@ def _standard_timezone_options() -> list[str]:
     preferred = [
         "Europe/Moscow",
         "Asia/Ufa",
+        "Asia/Yekaterinburg",
         "Asia/Omsk",
         "Asia/Krasnoyarsk",
         "Asia/Irkutsk",
@@ -234,6 +243,7 @@ def _top_timezone_options() -> list[str]:
         "Asia/Almaty",
         "Asia/Tashkent",
         "Asia/Yekaterinburg",
+        "Asia/Ufa",
         "Asia/Omsk",
         "Asia/Novosibirsk",
         "Asia/Krasnoyarsk",
@@ -291,10 +301,19 @@ NOTIFY_TYPES: list[tuple[str, str]] = []
 NOTIFY_TYPE_KEYS: list[str] = []
 CATALOG_NOTIFY_SECRET = "__catalog_notify"
 CATALOG_VERSIONS_SECRET = "__catalog_versions"
+SERVICE_TIMEZONE_SECRET = "__service_timezone"
+SERVICE_TIMEZONE_FALLBACK = "Europe/Moscow"
 
 ADMIN_BOOTSTRAP_FIRST_ADMIN = (os.getenv("ADMIN_BOOTSTRAP_FIRST_ADMIN", "0").strip().lower() in ("1", "true", "yes", "on"))
 
 _LOGIN_RE = re.compile(r"^[a-zA-Z0-9@._+-]{3,255}$")
+
+
+def _normalize_service_timezone_name(value: str) -> str:
+    tz_name = (value or "").strip()
+    if tz_name and tz_name in set(_standard_timezone_options()):
+        return tz_name
+    return SERVICE_TIMEZONE_FALLBACK
 
 
 def _admin_allowlist() -> frozenset[str]:
@@ -1316,6 +1335,9 @@ async def onboarding_page(request: Request, session: AsyncSession = Depends(get_
         return RedirectResponse("/login", status_code=303)
     csrf_token, set_cookie = _ensure_csrf(request)
     notify_catalog, versions_catalog = await _load_catalogs(session)
+    service_timezone = os.getenv("BOT_TIMEZONE", SERVICE_TIMEZONE_FALLBACK)
+    timezone_all_options = _standard_timezone_options()
+    timezone_labels = _timezone_labels(timezone_all_options)
     resp = templates.TemplateResponse(
         request,
         "onboarding.html",
@@ -1325,6 +1347,9 @@ async def onboarding_page(request: Request, session: AsyncSession = Depends(get_
             "saved": (request.query_params.get("saved") or "").strip(),
             "notify_catalog": notify_catalog,
             "versions_catalog": versions_catalog,
+            "service_timezone": _normalize_service_timezone_name(service_timezone),
+            "timezone_all_options": timezone_all_options,
+            "timezone_labels": timezone_labels,
         },
     )
     if set_cookie:
@@ -1335,6 +1360,7 @@ async def onboarding_page(request: Request, session: AsyncSession = Depends(get_
 @app.post("/onboarding/save")
 async def onboarding_save(
     request: Request,
+    service_timezone: Annotated[str, Form()] = "",
     csrf_token: Annotated[str, Form()] = "",
     session: AsyncSession = Depends(get_session),
 ):
@@ -1342,6 +1368,9 @@ async def onboarding_save(
     user = getattr(request.state, "current_user", None)
     if not user or getattr(user, "role", "") != "admin":
         return RedirectResponse("/login", status_code=303)
+    tz_value = _normalize_service_timezone_name(service_timezone)
+    await _upsert_secret_plain(session, SERVICE_TIMEZONE_SECRET, tz_value)
+    os.environ["BOT_TIMEZONE"] = tz_value
     key = load_master_key()
     form = await request.form()
     for secret_name in REQUIRED_SECRET_NAMES:
@@ -3297,6 +3326,7 @@ async def routes_version_del(
 def _events_filter_query_dict(
     date_from: str,
     date_to: str,
+    time_at: str,
     page_size: int,
 ) -> dict[str, str]:
     d: dict[str, str] = {"page_size": str(page_size)}
@@ -3304,10 +3334,21 @@ def _events_filter_query_dict(
         d["date_from"] = date_from.strip()
     if date_to.strip():
         d["date_to"] = date_to.strip()
+    if time_at.strip():
+        d["time_at"] = time_at.strip()
     return d
 
 
-def _load_filtered_event_lines(date_from_s: str, date_to_s: str):
+def _normalize_time_filter(value: str) -> str:
+    raw = (value or "").strip()
+    if not raw:
+        return ""
+    if re.fullmatch(r"\d{2}:\d{2}", raw):
+        return raw
+    return ""
+
+
+def _load_filtered_event_lines(date_from_s: str, date_to_s: str, time_at_s: str):
     path = _admin_events_log_path()
     raw, truncated = _read_events_log_scan(path, max_bytes=_admin_events_log_scan_bytes())
     parsed = parse_events_log_for_table(raw)
@@ -3325,6 +3366,9 @@ def _load_filtered_event_lines(date_from_s: str, date_to_s: str):
         filtered = parsed
     else:
         filtered = filter_parsed_lines_by_local_date(parsed, df, d_to, tz)
+    time_filter = _normalize_time_filter(time_at_s)
+    if time_filter:
+        filtered = [row for row in filtered if str(getattr(row, "time_ui", "")).startswith(time_filter)]
     return filtered, truncated, path
 
 
@@ -3333,6 +3377,7 @@ async def events_page(
     request: Request,
     date_from: str = "",
     date_to: str = "",
+    time_at: str = "",
     page: int = 1,
     page_size: int = 50,
 ):
@@ -3349,14 +3394,15 @@ async def events_page(
         page_size_i = 50
     page_size_i = min(200, max(5, page_size_i))
 
-    rows, truncated, log_path = _load_filtered_event_lines(date_from, date_to)
+    normalized_time = _normalize_time_filter(time_at)
+    rows, truncated, _log_path = _load_filtered_event_lines(date_from, date_to, normalized_time)
     total = len(rows)
     total_pages = max(1, (total + page_size_i - 1) // page_size_i) if total > 0 else 1
     page_i = max(1, min(page_i, total_pages))
     offset = (page_i - 1) * page_size_i
     page_rows = rows[offset : offset + page_size_i]
 
-    qdict = _events_filter_query_dict(date_from, date_to, page_size_i)
+    qdict = _events_filter_query_dict(date_from, date_to, normalized_time, page_size_i)
     qs_base = urlencode(qdict)
     events_filter_link_prefix = f"/events?{qs_base}&" if qs_base else "/events?"
 
@@ -3371,9 +3417,9 @@ async def events_page(
             "total_pages": total_pages,
             "filter_date_from": date_from,
             "filter_date_to": date_to,
+            "filter_time_at": normalized_time,
             "events_filter_link_prefix": events_filter_link_prefix,
             "export_qs": qs_base,
-            "events_log_path": str(log_path),
             "events_log_truncated": truncated,
         },
     )
@@ -3395,11 +3441,12 @@ async def events_export_csv(
     request: Request,
     date_from: str = "",
     date_to: str = "",
+    time_at: str = "",
 ):
     user = getattr(request.state, "current_user", None)
     if not user or getattr(user, "role", "") != "admin":
         raise HTTPException(403, "Только admin")
-    rows, _truncated, _path = _load_filtered_event_lines(date_from, date_to)
+    rows, _truncated, _path = _load_filtered_event_lines(date_from, date_to, _normalize_time_filter(time_at))
     body = events_log_to_csv_bytes(rows, max_rows=50_000)
     stamp = _now_utc().strftime("%Y%m%d")
     return Response(

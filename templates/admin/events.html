@@ -2,41 +2,50 @@
 {% from "macros.html" import page_head %}
 {% block title %}События{% endblock %}
 {% block content %}
-{% call page_head("События", "Таблица по файлу лога бота и строкам [ADMIN] (путь см. ниже). Фильтры «с даты / по дату» — календарные дни в BOT_TIMEZONE. Аудит операций панели (Docker, CRUD) пишется в отдельный файл — см. руководство администратора.") %}
-  <a class="btn btn-ghost" href="/events/export.csv{% if export_qs %}?{{ export_qs }}{% endif %}"><i class="fa-solid fa-download"></i> CSV (до 50 000 строк)</a>
+{% call page_head("События") %}
 {% endcall %}
 
 <form method="get" action="/events" class="card form" style="margin-bottom:1rem;">
-  <div class="filter-row" style="flex-wrap:wrap;">
-    <div class="field">
+  <div class="filter-row events-filter-row">
+    <div class="field events-date-field">
       <label for="date_from">С даты</label>
       <input id="date_from" type="date" name="date_from" value="{{ filter_date_from or '' }}"/>
     </div>
-    <div class="field">
+    <div class="field events-date-field">
       <label for="date_to">По дату</label>
       <input id="date_to" type="date" name="date_to" value="{{ filter_date_to or '' }}"/>
     </div>
-    <div class="field">
-      <label for="page_size">На странице</label>
-      <select id="page_size" name="page_size">
-        {% for n in [25, 50, 100, 200] %}
-        <option value="{{ n }}" {% if page_size == n %}selected{% endif %}>{{ n }}</option>
-        {% endfor %}
-      </select>
+    <div class="field events-time-field">
+      <label for="time_at">Время</label>
+      <input id="time_at" type="time" name="time_at" value="{{ filter_time_at or '' }}"/>
     </div>
-    <div class="page-actions" style="align-self:flex-end;">
+    <div class="field events-page-size-field">
+      <label for="page_size">На странице</label>
+      <div class="events-page-size-row">
+        <select id="page_size" name="page_size">
+          {% for n in [25, 50, 100, 200] %}
+          <option value="{{ n }}" {% if page_size == n %}selected{% endif %}>{{ n }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+    <div class="page-actions events-actions">
       <button type="submit" class="btn btn-primary">Применить</button>
       <a class="btn btn-ghost" href="/events">Сбросить</a>
+    </div>
+    <div class="events-csv-slot">
+      <a class="btn btn-ghost" href="/events/export.csv{% if export_qs %}?{{ export_qs }}{% endif %}">
+        <i class="fa-solid fa-download"></i> CSV
+      </a>
     </div>
   </div>
 </form>
 
+{% if events_log_truncated %}
 <p class="muted" style="margin-bottom:0.5rem;font-size:0.9rem;">
-  Источник: <code>{{ events_log_path }}</code>
-  {% if events_log_truncated %}
-  · <strong>показан хвост файла</strong> (лимит <code>ADMIN_EVENTS_LOG_SCAN_BYTES</code>); фильтр по датам действует только по загруженному фрагменту.
-  {% endif %}
+  <strong>Показан хвост файла</strong> (лимит <code>ADMIN_EVENTS_LOG_SCAN_BYTES</code>); фильтр по датам действует только по загруженному фрагменту.
 </p>
+{% endif %}
 
 <p class="muted" style="margin-bottom:0.75rem;">Всего по фильтру: <strong>{{ total }}</strong>{% if total_pages > 1 %} · страница {{ page }} из {{ total_pages }}{% endif %}</p>
 

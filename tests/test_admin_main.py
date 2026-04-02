@@ -52,7 +52,7 @@ def test_events_page_includes_events_table(client: TestClient):
         pytest.skip("Нет доступа к /events")
     assert "События" in r.text
     assert "Дата" in r.text and "Уровень" in r.text and "Сообщение" in r.text
-    assert "Источник:" in r.text
+    assert "Всего по фильтру:" in r.text
 
 
 def test_health_ok(client: TestClient):
@@ -228,6 +228,11 @@ def test_version_presets_helpers():
     assert admin_main._version_preset(["1.0"], ["1.0"]) == "custom"
 
 
+def test_top_timezone_options_include_ufa():
+    top = admin_main._top_timezone_options()
+    assert "Asia/Ufa" in top or "Asia/Yekaterinburg" in top
+
+
 def test_work_hours_range_parser():
     assert admin_main._parse_work_hours_range("09:00-18:00") == ("09:00", "18:00")
     assert admin_main._parse_work_hours_range("") == ("", "")
@@ -298,6 +303,7 @@ def test_onboarding_page_copy(client: TestClient):
     # Без авторизации будет редирект на login/setup, поэтому проверяем только если отдалась страница.
     if r.status_code == 200:
         assert "Настройки подключений" in r.text
+        assert "Таймзона сервиса" in r.text
 
 
 def test_parse_status_keys_list_dedup_and_order():
