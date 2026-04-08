@@ -315,10 +315,19 @@ def _matrix_bot_mxid() -> str:
 
 def _matrix_domain() -> str:
     """Извлекаем домен из MXID бота: @bot:messenger.red-soft.ru → messenger.red-soft.ru"""
-    mxid = _matrix_bot_mxid()
+    # Пытаемся получить из env (для тестов), если нет — пустая строка (будет заполнено в роутах из БД)
+    mxid = (os.getenv("MATRIX_USER_ID") or "").strip()
     if ":" in mxid:
         return mxid.split(":", 1)[1]
     return ""
+
+
+async def _get_matrix_domain_from_db(session: AsyncSession) -> str:
+    """Читает домен из БД (для использования в роутах)."""
+    mxid = await _load_secret_plain(session, "MATRIX_USER_ID")
+    if ":" in mxid:
+        return mxid.split(":", 1)[1]
+    return _matrix_domain()  # Fallback на env
 NOTIFY_TYPE_KEYS: list[str] = []
 CATALOG_NOTIFY_SECRET = "__catalog_notify"
 CATALOG_VERSIONS_SECRET = "__catalog_versions"
@@ -2638,6 +2647,7 @@ async def users_new(
         raise HTTPException(403, "Только admin")
     groups_rows = list((await session.execute(select(SupportGroup).order_by(SupportGroup.name.asc()))).scalars().all())
     notify_catalog, versions_catalog = await _load_catalogs(session)
+    matrix_domain = await _get_matrix_domain_from_db(session)
     return templates.TemplateResponse(
         request,
         "user_form.html",
@@ -2645,7 +2655,7 @@ async def users_new(
             "title": "Новый пользователь",
             "u": None,
             "room_localpart": "",
-            "matrix_domain": _matrix_domain(),
+            "matrix_domain": matrix_domain,
             "notify_json": '["all"]',
             "notify_preset": "all",
             "notify_selected": ["all"],
@@ -2990,6 +3000,7 @@ async def users_edit(
     version_rows = list((await session.execute(uv_stmt)).scalars().all())
     groups_rows = list((await session.execute(select(SupportGroup).order_by(SupportGroup.name.asc()))).scalars().all())
     notify_catalog, versions_catalog = await _load_catalogs(session)
+    matrix_domain = await _get_matrix_domain_from_db(session)
     notify_keys = {item["key"] for item in notify_catalog}
     notify_selected = [str(x).strip() for x in (row.notify or ["all"]) if str(x).strip()]
     if "all" not in notify_selected:
@@ -3003,7 +3014,7 @@ async def users_edit(
             "title": f"Пользователь Redmine {row.redmine_id}",
             "u": row,
             "room_localpart": _room_localpart(row.room),
-            "matrix_domain": _matrix_domain(),
+            "matrix_domain": matrix_domain,
             "notify_json": json.dumps(row.notify, ensure_ascii=False),
             "notify_preset": _notify_preset(row.notify),
             "notify_selected": notify_selected,
