@@ -84,6 +84,10 @@ def _unparsed_line(raw: str) -> ParsedLogLine:
     return ParsedLogLine("—", "—", "—", s[:8000] if s else "—", None, raw)
 
 
+def _safe_startswith(val, prefix: str) -> bool:
+    return str(val).startswith(prefix)
+
+
 def parse_events_log_line(line: str, *, display_tz: ZoneInfo, assume_utc: bool) -> ParsedLogLine:
     """Разбор одной строки: ISO asctime бота или ДД.ММ.ГГГГ с опциональным [LEVEL]."""
     raw = line
@@ -96,7 +100,7 @@ def parse_events_log_line(line: str, *, display_tz: ZoneInfo, assume_utc: bool) 
         date_s, time_s, tail = m.group(1), m.group(2), (m.group(3) or "").lstrip()
         level = "—"
         message = tail
-        if tail.startswith("["):
+        if _safe_startswith(tail, "["):
             bm = re.match(r"^\[(\w+)\]\s*(.*)$", tail, re.DOTALL)
             if bm:
                 level = bm.group(1)
@@ -125,7 +129,7 @@ def parse_events_log_line(line: str, *, display_tz: ZoneInfo, assume_utc: bool) 
         tail = (m.group(2) or "").lstrip()
         level = "—"
         message = tail
-        if tail.startswith("["):
+        if _safe_startswith(tail, "["):
             bm = re.match(r"^\[(\w+)\]\s*(.*)$", tail, re.DOTALL)
             if bm:
                 level = bm.group(1)
@@ -148,18 +152,24 @@ def parse_events_log_line(line: str, *, display_tz: ZoneInfo, assume_utc: bool) 
     return _unparsed_line(raw)
 
 
+def _safe_startswith(val, prefix: str) -> bool:
+    """Безопасный startswith: приводит val к строке, если это не строка."""
+    return str(val).startswith(prefix)
+
+
 def parse_events_log_for_table(raw: str) -> list[ParsedLogLine]:
     """
     Все строки файла → список; сортировка от новых к старым по разобранному времени.
     Служебные сообщения об отсутствии файла — одна строка таблицы без sort_key.
     """
-    if not raw or raw.startswith("Файл лога не найден") or raw.startswith("Не удалось прочитать"):
-        return [_unparsed_line(raw)]
+    raw_str = str(raw)
+    if not raw_str or raw_str.startswith("Файл лога не найден") or raw_str.startswith("Не удалось прочитать"):
+        return [_unparsed_line(raw_str)]
 
     tz = _display_tz()
     assume = _parse_as_utc()
     out: list[ParsedLogLine] = []
-    for line in raw.splitlines():
+    for line in raw_str.splitlines():
         if not line.strip():
             continue
         out.append(parse_events_log_line(line, display_tz=tz, assume_utc=assume))
@@ -218,15 +228,12 @@ def events_log_to_csv_bytes(lines: list[ParsedLogLine], *, max_rows: int = 50_00
 
 
 def format_events_log_for_ui(raw: str) -> str:
-    """
-    Хвост файла: переворачиваем строки (свежее сверху), форматируем время.
-    Служебные сообщения об отсутствии файла не трогаем.
-    """
-    if not raw or raw.startswith("Файл лога не найден") or raw.startswith("Не удалось прочитать"):
-        return raw
+    raw_str = str(raw)
+    if not raw_str or raw_str.startswith("Файл лога не найден") or raw_str.startswith("Не удалось прочитать"):
+        return raw_str
     assume_utc = _parse_as_utc()
     tz = _display_tz()
-    lines = raw.splitlines()
+    lines = raw_str.splitlines()
     out = [reformat_log_line(line, display_tz=tz, assume_utc=assume_utc) for line in lines]
     out.reverse()
     return "\n".join(out)
