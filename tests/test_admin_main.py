@@ -15,7 +15,7 @@ os.environ.setdefault("APP_MASTER_KEY", "0123456789abcdef0123456789abcdef")
 # Тесты /setup и /login не должны зависеть от локального ADMIN_LOGINS в окружении разработчика.
 os.environ.pop("ADMIN_LOGINS", None)
 
-import admin_main  # noqa: E402
+import src.admin.main as admin_main  # noqa: E402
 
 
 @pytest.fixture
