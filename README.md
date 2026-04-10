@@ -2,19 +2,20 @@
 
 Бот автоматически отслеживает изменения в задачах Redmine и отправляет уведомления в Matrix-чат (Element / Synapse / любой Matrix-клиент).
 
-### Актуальная схема (репозиторий `matrix_bot_firebeard`)
+### Актуальная схема
 
 | Что | Как сейчас |
 |-----|------------|
-| Запуск | **`python bot.py`** из корня репозитория (файл **`bot.py`**, не `src/bot.py`) |
+| Запуск | **`docker compose up --build -d`** или **`./deploy.sh`** |
+| Код бота | `src/bot/main.py` (не корневой `bot.py`) |
+| Админка | `src/admin/main.py` (FastAPI + Jinja2 + HTMX) |
 | Пользователи и маршруты | Postgres таблицы (`bot_users` + routes) с редактированием через сервис **admin** |
 | State | Postgres **`bot_issue_state`** (дедупликация и таймеры уведомлений) + lease по пользователю **`bot_user_leases`** |
 | Интервал опроса Redmine | По умолчанию **90 с**; переопределение переменной **`CHECK_INTERVAL`** в `.env` (не ниже 15 с) |
 | Matrix | Отправка через **`src/matrix_send.py`** (`room_send_with_retry`): до **3** попыток, паузы **1 с** и **2 с** |
-| PostgreSQL (Docker) | Сервис в **`docker-compose.yml`**; конфиг пользователей/маршрутов и **state** — в Postgres через **админку** |
 | `src/preferences.py` (DND / рабочие часы) | **`can_notify()`** вызывается из **`send_safe`** и для утреннего отчёта: для личной комнаты — поля пользователя из Postgres; для **комнаты группы** — настройки группы (`group_delivery` в рантайме); приоритет «Аварийный» пробивает ограничения |
 
-Ниже — рабочая документация по текущей схеме (`bot.py` + Postgres + admin UI).
+Ниже — рабочая документация по текущей схеме.
 
 ---
 
@@ -39,10 +40,10 @@
 ### Логика бота (как сейчас)
 
 ```
-┌──────────┐   REST API (~каждые 90с)   ┌──────────────┐  Matrix C-S API   ┌──────────┐
-│  Redmine │ ◄───────────────────────── │   bot.py     │ ────────────────► │  Matrix  │
-│  (задачи)│                            │ APScheduler  │                   │  (чат)   │
-└──────────┘                            └──────┬───────┘                   └──────────┘
+┌──────────┐   REST API (~каждые 90с)   ┌──────────────────┐  Matrix C-S API   ┌──────────┐
+│  Redmine │ ◄───────────────────────── │ src/bot/main.py  │ ────────────────► │  Matrix  │
+│  (задачи)│                            │ APScheduler      │                   │  (чат)   │
+└──────────┘                            └──────┬───────────┘                   └──────────┘
                                                │
                                         ┌──────▼─────────────────────┐
                                         │ Postgres: bot_issue_state  │
@@ -100,32 +101,41 @@ matrix_bot_firebeard/
 ├── requirements-lock.txt
 ├── README.md
 ├── .env                   # Секреты — не коммитить
-├── .cursorrules           # Правила для ассистента в Cursor
-├── src/                   # Общие модули и задел под рефакторинг
-│   ├── config.py
-│   ├── utils.py           # в т.ч. safe_html()
-│   ├── matrix_client.py
-│   ├── matrix_send.py
-│   ├── preferences.py
-│   └── ...
-└── tests/                 # pytest: test_bot.py + модули src/
-    └── conftest.py
+├── deploy.sh              # Zero-Config запуск
+├── src/                   # Исходный код
+│   ├── bot/
+│   │   └── main.py        # Основной модуль бота
+│   ├── admin/
+│   │   └── main.py        # Веб-панель управления (FastAPI)
+│   ├── database/
+│   │   ├── models.py      # SQLAlchemy модели
+│   │   └── session.py     # Сессии БД
+│   ├── config.py          # Конфигурация, загрузка .env
+│   ├── security.py        # Хеширование паролей, шифрование
+│   ├── mail.py            # Отправка email
+│   ├── matrix_client.py   # Matrix клиент
+│   ├── matrix_send.py     # Отправка сообщений в Matrix
+│   └── preferences.py     # Рабочие часы, DND, уведомления
+├── alembic/               # Миграции БД
+├── templates/             # Jinja2 шаблоны админки
+├── scripts/               # Вспомогательные скрипты
+└── tests/                 # pytest тесты
 ```
 
 ### Модули `src/` — краткое описание
 
-| Модуль | Назначение | Тесты |
-|--------|-----------|:-----:|
-| `config.py` | Загрузка `.env`, пути, приоритеты, статусы Redmine, `validate_config()` | 15 |
-| `utils.py` | `now()`, `safe_html()`, `truncate_text()`, timezone | 25 |
-| `preferences.py` | Рабочие часы, DND, `can_notify()` с Emergency bypass | 27 |
-| `matrix_client.py` | Singleton `AsyncClient`, access_token, `send_message()` → `matrix_send` | 10 |
-| `matrix_send.py` | Общая отправка в Matrix с retry (использует и `bot.py`, и `matrix_client`) | — |
-| `redmine_checks.py` | Основная логика проверки задач | — |
-| `routing.py` | Выбор комнаты Matrix по статусу/версии задачи | — |
-| `commands.py` | Интерактивные команды бота | — |
-| `onboarding.py` | Регистрация новых пользователей | — |
-| `reports.py` | Генерация отчётов | — |
+| Модуль | Назначение |
+|--------|-----------|
+| `bot/main.py` | Основной цикл бота: опрос Redmine, отправка уведомлений в Matrix |
+| `admin/main.py` | Веб-панель: аутентификация, настройки, управление пользователями |
+| `database/models.py` | SQLAlchemy модели: BotUser, BotSession, SupportGroup и др. |
+| `database/session.py` | Async-сессии БД, формирование DATABASE_URL |
+| `config.py` | Загрузка `.env`, пути, статусы Redmine, `validate_config()` |
+| `security.py` | Хеширование паролей (argon2), шифрование секретов (AES-GCM) |
+| `mail.py` | Отправка email, маска идентификатора |
+| `matrix_client.py` | Singleton AsyncClient, access_token |
+| `matrix_send.py` | Отправка в Matrix с retry |
+| `preferences.py` | Рабочие часы, DND, `can_notify()` с Emergency bypass |
 
 ---
 

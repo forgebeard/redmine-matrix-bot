@@ -1,10 +1,7 @@
 """
-Тесты корневого bot.py (Redmine → Matrix).
+Тесты бота (src/bot/main.py).
 
-Зачем отдельный файл: основная логика живёт в bot.py в корне репозитория;
-модули из src/ тестируются в test_config.py, test_utils.py и т.д.
-
-Перед импортом bot подставляются переменные окружения (минимальный .env),
+Перед импортом подставляются переменные окружения (минимальный .env),
 чтобы бот не падал на валидации при загрузке модуля.
 
 Запуск из корня проекта:
@@ -21,19 +18,18 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-# Минимальный .env до import bot — иначе main() не вызывается, но константы валидируются при тестах
+# Минимальный .env до import — иначе main() не вызывается, но константы валидируются при тестах
 os.environ.setdefault("MATRIX_HOMESERVER", "https://test.server")
 os.environ.setdefault("MATRIX_ACCESS_TOKEN", "test_token")
 os.environ.setdefault("MATRIX_USER_ID", "@bot:test.server")
 os.environ.setdefault("MATRIX_DEVICE_ID", "TESTDEVICE")
-# Не setdefault: локальный REDMINE_URL из окружения не должен ломать проверки ссылок в HTML.
 os.environ["REDMINE_URL"] = "https://redmine.test"
 os.environ.setdefault("REDMINE_API_KEY", "test_api_key")
 os.environ.setdefault("MATRIX_ONBOARDING_ENABLED", "0")
 os.environ.setdefault("BOT_TIMEZONE", "Europe/Moscow")
 os.environ.setdefault("USERS", '[{"redmine_id": 1972, "room": "!test:server", "notify": ["all"]}]')
 
-import bot
+import src.bot.main as bot
 import matrix_send
 from tests.conftest import MockIssue, MockJournal
 

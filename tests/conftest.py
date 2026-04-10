@@ -26,7 +26,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_PROJECT_ROOT / "src"))
+sys.path.insert(0, str(_PROJECT_ROOT))  # Для import src.bot.main
 
 # До импорта admin_main / database.session (иначе engine создастся без NullPool).
 os.environ.setdefault("SQLALCHEMY_NULL_POOL", "1")

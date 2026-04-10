@@ -134,9 +134,6 @@ GROUP_REPEAT_SECONDS = int(os.getenv("GROUP_REPEAT_SECONDS", "1800").strip() or 
 # Кэш master key для расшифровки персональных ключей Redmine
 _BOT_MASTER_KEY: bytes | None = None
 
-# Обратная совместимость тестов (реальные константы — в matrix_send.py)
-MATRIX_SEND_MAX_RETRIES = MAX_RETRIES
-
 # --- Статусы Redmine ---
 STATUS_NEW           = "Новая"
 STATUS_INFO_PROVIDED = "Информация предоставлена"
@@ -191,13 +188,10 @@ if want_log_file():
         _fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
         logger.addHandler(_fh)
     except PermissionError as e:
-        print(f"Файловый лог недоступен (нет прав): {e}", file=sys.stderr)
+        logger.warning("Файловый лог недоступен (нет прав): %s", e)
     except OSError as e:
         if e.errno in (errno.EACCES, errno.EPERM):
-            print(
-                f"Файловый лог недоступен (errno={e.errno}): {e}",
-                file=sys.stderr,
-            )
+            logger.warning("Файловый лог недоступен (errno=%s): %s", e.errno, e)
         else:
             raise
 

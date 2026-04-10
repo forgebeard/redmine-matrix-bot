@@ -33,7 +33,7 @@ _ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_ROOT / "src"))
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -3951,7 +3951,7 @@ async def me_settings_get(
                 "error": (
                     "Учётная запись в панели ещё не связана с Redmine. "
                     "Подписка на уведомления настраивается через бота в Matrix "
-                    "(см. docs/MATRIX_ONBOARDING_PLAN.md) или попросите администратора завести вас в разделе «Пользователи»."
+                    "или попросите администратора завести вас в разделе «Пользователи»."
                 ),
                 "matrix_bot_mxid": _matrix_bot_mxid(),
                 "csrf_token": csrf_token,

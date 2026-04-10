@@ -154,7 +154,7 @@ async def test_reminder_and_overdue_conditions_from_loaded_state():
     from database.session import get_session_factory
     from database.state_repo import load_user_issue_state, upsert_user_issue_state
 
-    from bot import REMINDER_AFTER, ensure_tz
+    from src.bot.main import REMINDER_AFTER, ensure_tz
 
     factory = get_session_factory()
     uid = 1972
