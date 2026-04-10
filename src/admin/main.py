@@ -14,6 +14,7 @@ from contextlib import asynccontextmanager
 from html import escape as html_escape
 import logging
 import os
+import re
 import sys
 import secrets
 import threading
