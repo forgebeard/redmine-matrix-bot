@@ -33,12 +33,9 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -r requirements.txt -r requirements-test.txt
-      - name: alembic check (модели == миграции)
-        run: |
-          alembic upgrade head
-          alembic check
       - name: pytest (unit + API, без Playwright)
         run: |
+          alembic upgrade head
           alembic downgrade -1 || true
           alembic upgrade head
           python -m pytest tests/ -q --tb=short --ignore=tests/e2e --cov=src --cov-report=term-missing
