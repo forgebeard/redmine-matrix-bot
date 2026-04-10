@@ -175,6 +175,19 @@ def _append_ops_to_events_log(line: str) -> None:
     except Exception as e:
         logger.warning("events_log write error: %s", e)
 
+
+def _append_audit_file_line(message: str) -> None:
+    audit_log_path = (os.getenv("ADMIN_AUDIT_LOG_PATH") or "").strip()
+    if not audit_log_path:
+        return
+    try:
+        p = Path(audit_log_path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with p.open("a", encoding="utf-8") as f:
+            f.write(f"{_now_utc().isoformat()} {message}\n")
+    except Exception as e:
+        logger.warning("audit_log write error: %s", e)
+
 # ── Secret masking ───────────────────────────────────────────────────────────
 
 def _mask_secret(value: str | None, mask_url: bool = False) -> str:

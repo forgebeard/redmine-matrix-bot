@@ -5,6 +5,9 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
+import time
+import asyncio
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
@@ -13,19 +16,77 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from urllib.parse import urlencode
 
-from database.session import get_session
-from database.models import BotAppUser
+from database.session import get_session, get_session_factory
+from database.models import BotAppUser, BotHeartbeat, BotOpsAudit
 from ops.docker_control import control_service, get_service_status, DockerControlError
 
 from admin.helpers import (
     _verify_csrf, _client_ip, _rate_limiter, _append_ops_to_events_log,
-    _now_utc, DASHBOARD_PATH,
+    _now_utc, DASHBOARD_PATH, _append_audit_file_line,
 )
-from admin.main import _audit_op, _restart_in_background, _truncate_ops_detail
 
 logger = logging.getLogger("redmine_admin")
 
 router = APIRouter(tags=["ops"])
+
+
+def _truncate_ops_detail(s: str, max_len: int = 400) -> str:
+    t = (s or "").replace("\n", " ").replace("\r", " ")
+    if len(t) > max_len:
+        return t[: max_len - 1] + "…"
+    return t
+
+
+async def _audit_op(
+    session: AsyncSession,
+    action: str,
+    status: str,
+    actor_login: str | None = None,
+    detail: str | None = None,
+) -> None:
+    row = BotOpsAudit(
+        actor_login=(actor_login or "").strip().lower() or None,
+        action=action, status=status,
+        detail=(detail or "")[:2000] or None,
+    )
+    session.add(row)
+    d = ((detail or "").replace("\n", " "))[:1800]
+    parts = [f"op={action}", f"status={status}"]
+    al = (actor_login or "").strip()
+    if al:
+        parts.append(f"actor={al}")
+    if d:
+        parts.append(f"detail={d}")
+    _append_audit_file_line(" ".join(parts))
+    logger.info(json.dumps({"level": "AUDIT", "action": action, "status": status,
+        "actor_login": al, "detail": d}, ensure_ascii=False))
+
+
+def _restart_in_background(actor_login: str | None) -> None:
+    def _run() -> None:
+        time.sleep(1.5)
+        detail = ""
+        status = "ok"
+        try:
+            control_service("restart")
+            detail = "restart command accepted"
+        except Exception as e:
+            status = "error"
+            detail = str(e)
+
+        async def _persist() -> None:
+            factory = get_session_factory()
+            async with factory() as s:
+                await _audit_op(s, "BOT_RESTART", status, actor_login=actor_login, detail=detail)
+                await s.commit()
+
+        try:
+            asyncio.run(_persist())
+        except Exception:
+            logger.exception("failed to persist restart audit")
+
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
 
 
 @router.post("/ops/bot/{action}")
