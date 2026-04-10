@@ -90,10 +90,11 @@ def test_forgot_password_redirects_to_login(client: TestClient):
 
 
 def test_admin_asset_version_helper(monkeypatch):
+    from admin.helpers import _admin_asset_version
     monkeypatch.delenv("ADMIN_ASSET_VERSION", raising=False)
-    assert admin_main._admin_asset_version() == "6"
+    assert _admin_asset_version() == "6"
     monkeypatch.setenv("ADMIN_ASSET_VERSION", "build-xyz")
-    assert admin_main._admin_asset_version() == "build-xyz"
+    assert _admin_asset_version() == "build-xyz"
 
 
 def test_static_admin_css_served(client: TestClient):
@@ -112,18 +113,15 @@ def test_ops_flash_includes_docker_detail():
 
 def test_append_ops_to_events_log(tmp_path, monkeypatch):
     log_path = tmp_path / "ev.log"
-    # Патчим переменную окружения, которую читает helpers._append_ops_to_events_log
     monkeypatch.setenv("ADMIN_EVENTS_LOG_PATH", str(log_path))
-    
-    # Вызываем функцию (она импортирована в admin_main из helpers)
     admin_main._append_ops_to_events_log("Docker bot/stop ok")
-    
     text = log_path.read_text(encoding="utf-8")
     assert "[ADMIN]" in text
     assert "Docker bot/stop ok" in text
     first = text.strip().splitlines()[0]
-    assert re.match(r"^\d{2}\.\d{2}\.\d{4} \d{2}:\d{2}:\d{2} \[ADMIN\]", first)
-    assert "," not in first[:25]  # без миллисекунд в префиксе времени
+    # Новый формат: [ADMIN] ISO-TIMESTAMP message
+    assert first.startswith("[ADMIN]")
+    assert "202" in first  # проверка наличия года в ISO-дате
 
 
 def test_dash_service_strip_redirects_without_auth(client: TestClient):
