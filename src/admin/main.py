@@ -3170,7 +3170,13 @@ def _load_filtered_event_lines(date_from_s: str, date_to_s: str, time_at_s: str)
         filtered = filter_parsed_lines_by_local_date(parsed, df, d_to, tz)
     time_filter = _normalize_time_filter(time_at_s)
     if time_filter and filtered:
-        filtered = [row for row in filtered if str(getattr(row, "time_ui", "") or "").startswith(time_filter)]
+        # Гарантируем, что time_filter — строка
+        tf = str(time_filter) if isinstance(time_filter, str) else ""
+        if tf:
+            filtered = [
+                row for row in filtered
+                if str(getattr(row, "time_ui", "") or "").startswith(tf)
+            ]
     return filtered, truncated, path
 
 
