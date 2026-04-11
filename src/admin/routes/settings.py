@@ -39,11 +39,7 @@ _UNMASKED_SECRETS = {"REDMINE_URL", "MATRIX_HOMESERVER", "MATRIX_USER_ID"}
 def _check_redmine_access(url: str, api_key: str) -> tuple[bool, str]:
     base = (url or "").strip().rstrip("/")
     key = (api_key or "").strip()
-    logger.info("=== REDMINE CHECK START ===")
-    logger.info("Base URL: %s", base)
-    logger.info("Key length: %d", len(key))
-    # ВАЖНО: Выводим сам ключ, чтобы видеть спецсимволы
-    logger.warning(">>> RAW REDMINE KEY: %s", repr(key))
+    logger.info("Redmine check: URL=%s, KeyLen=%d", base, len(key))
     
     if not base or not key:
         return False, "Redmine: укажите URL и API-ключ."
@@ -56,7 +52,6 @@ def _check_redmine_access(url: str, api_key: str) -> tuple[bool, str]:
         return False, f"Redmine: API-ключ содержит недопустимые символы (нужен только английский)."
 
     target_url = f"{base}/users/current.json"
-    logger.info("Request URL: %s", target_url)
     
     try:
         with httpx.Client(timeout=6.0) as client:
@@ -64,7 +59,7 @@ def _check_redmine_access(url: str, api_key: str) -> tuple[bool, str]:
                 target_url,
                 headers={"X-Redmine-API-Key": key, "Accept": "application/json"},
             )
-            logger.info("Response status: %d", resp.status_code)
+            logger.info("Redmine response status: %d", resp.status_code)
             
             if resp.status_code != 200:
                 return False, f"Redmine: HTTP {resp.status_code}."
@@ -86,12 +81,7 @@ def _check_matrix_access(homeserver: str, user_id: str, token: str) -> tuple[boo
     hs = (homeserver or "").strip().rstrip("/")
     mxid = (user_id or "").strip()
     access_token = (token or "").strip()
-    logger.info("=== MATRIX CHECK START ===")
-    logger.info("Homeserver: %s", hs)
-    logger.info("User ID: %s", mxid)
-    logger.info("Token length: %d", len(access_token))
-    # ВАЖНО: Выводим токен, чтобы видеть спецсимволы
-    logger.warning(">>> RAW MATRIX TOKEN: %s", repr(access_token))
+    logger.info("Matrix check: HS=%s, UID=%s, TokLen=%d", hs, mxid, len(access_token))
     
     if not hs or not mxid or not access_token:
         return False, "Matrix: укажите homeserver, user id и token."
@@ -104,31 +94,27 @@ def _check_matrix_access(homeserver: str, user_id: str, token: str) -> tuple[boo
         return False, f"Matrix: Токен содержит недопустимые символы (нужен только английский)."
     
     versions_url = f"{hs}/_matrix/client/versions"
-    logger.info("Versions URL: %s", versions_url)
     
     try:
         with httpx.Client(timeout=6.0) as client:
             # 1. Проверка доступности сервера
             resp = client.get(versions_url)
-            logger.info("Versions status: %d", resp.status_code)
+            logger.info("Matrix versions status: %d", resp.status_code)
             if resp.status_code != 200:
                 return False, f"Matrix: HTTP {resp.status_code}."
             
             # 2. Проверка токена
             whoami_url = f"{hs}/_matrix/client/v3/account/whoami"
-            logger.info("Whoami URL: %s", whoami_url)
             who_resp = client.get(
                 whoami_url,
                 headers={"Authorization": f"Bearer {access_token}"},
             )
-            logger.info("Whoami status: %d", who_resp.status_code)
+            logger.info("Matrix whoami status: %d", who_resp.status_code)
             
             if who_resp.status_code != 200:
                 return False, f"Matrix: токен недействителен (HTTP {who_resp.status_code})."
             
             data = who_resp.json()
-            logger.info("Whoami JSON: %s", data)
-            
             got_user = data.get("user_id", "")
             if got_user and got_user != mxid:
                 return True, f"Matrix: подключение успешно, но token принадлежит {got_user}."
@@ -399,14 +385,10 @@ async def onboarding_check(
     secret_MATRIX_USER_ID: Annotated[str, Form()] = "",
     secret_MATRIX_ACCESS_TOKEN: Annotated[str, Form()] = "",
     csrf_token: Annotated[str, Form()] = "",
+    session: AsyncSession = Depends(get_session),
 ):
     """Проверяет доступность Redmine и Matrix."""
-    logger.info("=== ONBOARDING CHECK RECEIVED ===")
-    logger.info("REDCMINE_URL: %s", secret_REDMINE_URL)
-    logger.info("REDCMINE_API_KEY len: %d", len(secret_REDMINE_API_KEY))
-    logger.info("MATRIX_HOMESERVER: %s", secret_MATRIX_HOMESERVER)
-    logger.info("MATRIX_USER_ID: %s", secret_MATRIX_USER_ID)
-    logger.info("MATRIX_ACCESS_TOKEN len: %d", len(secret_MATRIX_ACCESS_TOKEN))
+    logger.info("=== ONBOARDING CHECK STARTED ===")
     
     admin = _admin()
     user = getattr(request.state, "current_user", None)
@@ -415,20 +397,43 @@ async def onboarding_check(
 
     admin._verify_csrf(request, csrf_token)
 
+    # 1. Загружаем реальные секреты из БД, чтобы использовать их, если форма прислала маскированные (•••)
+    db_secrets: dict[str, str] = {}
+    rows = await session.execute(select(AppSecret))
+    for row in rows.scalars().all():
+        try:
+            db_secrets[row.name] = decrypt_secret(row.ciphertext, row.nonce, load_master_key())
+        except Exception:
+            pass
+
+    def _resolve(secret_name: str, form_value: str) -> str:
+        """Если значение маскировано (•), берем из БД. Иначе берем из формы."""
+        if "•" in form_value:
+            return db_secrets.get(secret_name, form_value)
+        return form_value
+
+    # 2. Разрешаем значения
+    redmine_url = _resolve("REDMINE_URL", secret_REDMINE_URL)
+    redmine_key = _resolve("REDMINE_API_KEY", secret_REDMINE_API_KEY)
+    matrix_hs = _resolve("MATRIX_HOMESERVER", secret_MATRIX_HOMESERVER)
+    matrix_uid = _resolve("MATRIX_USER_ID", secret_MATRIX_USER_ID)
+    matrix_tok = _resolve("MATRIX_ACCESS_TOKEN", secret_MATRIX_ACCESS_TOKEN)
+
+    # 3. Проверяем
     logger.info("Calling _check_redmine_access...")
     redmine_ok, redmine_msg = await asyncio.to_thread(
         _check_redmine_access,
-        secret_REDMINE_URL,
-        secret_REDMINE_API_KEY,
+        redmine_url,
+        redmine_key,
     )
     logger.info("Redmine result: ok=%s, msg=%s", redmine_ok, redmine_msg)
     
     logger.info("Calling _check_matrix_access...")
     matrix_ok, matrix_msg = await asyncio.to_thread(
         _check_matrix_access,
-        secret_MATRIX_HOMESERVER,
-        secret_MATRIX_USER_ID,
-        secret_MATRIX_ACCESS_TOKEN,
+        matrix_hs,
+        matrix_uid,
+        matrix_tok,
     )
     logger.info("Matrix result: ok=%s, msg=%s", matrix_ok, matrix_msg)
     
