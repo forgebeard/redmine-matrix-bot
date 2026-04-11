@@ -42,14 +42,21 @@ def _check_redmine_access(url: str, api_key: str) -> tuple[bool, str]:
     logger.info("=== REDMINE CHECK START ===")
     logger.info("Base URL: %s", base)
     logger.info("Key length: %d", len(key))
-    logger.info("Key first 10 chars: %s", repr(key[:10]) if key else "EMPTY")
+    # ВАЖНО: Выводим сам ключ, чтобы видеть спецсимволы
+    logger.warning(">>> RAW REDMINE KEY: %s", repr(key))
     
     if not base or not key:
         return False, "Redmine: укажите URL и API-ключ."
     
+    # Проверка на нелатинские символы ДО запроса
+    try:
+        key.encode("ascii")
+    except UnicodeEncodeError:
+        logger.error("Redmine key contains non-ASCII chars: %s", repr(key))
+        return False, f"Redmine: API-ключ содержит недопустимые символы (нужен только английский)."
+
     target_url = f"{base}/users/current.json"
     logger.info("Request URL: %s", target_url)
-    logger.info("Headers: X-Redmine-API-Key=%s, Accept=application/json", "SET" if key else "MISSING")
     
     try:
         with httpx.Client(timeout=6.0) as client:
@@ -58,14 +65,11 @@ def _check_redmine_access(url: str, api_key: str) -> tuple[bool, str]:
                 headers={"X-Redmine-API-Key": key, "Accept": "application/json"},
             )
             logger.info("Response status: %d", resp.status_code)
-            logger.info("Response body (first 200): %s", resp.text[:200])
             
             if resp.status_code != 200:
                 return False, f"Redmine: HTTP {resp.status_code}."
             
             data = resp.json()
-            logger.info("JSON data: %s", data)
-            
             user = data.get("user") if isinstance(data, dict) else {}
             login = str((user or {}).get("login") or "").strip()
             suffix = f" (user: {login})" if login else ""
@@ -73,12 +77,6 @@ def _check_redmine_access(url: str, api_key: str) -> tuple[bool, str]:
     except httpx.ConnectError as e:
         logger.error("Redmine ConnectError: %s", e)
         return False, f"Redmine: нет ответа (URL/сеть)."
-    except httpx.HTTPStatusError as e:
-        logger.error("Redmine HTTPStatusError: %s", e)
-        return False, f"Redmine: HTTP ошибка {e.response.status_code}."
-    except httpx.RequestError as e:
-        logger.error("Redmine RequestError: %s", e)
-        return False, f"Redmine: ошибка запроса ({type(e).__name__}: {e})."
     except Exception as e:
         logger.error("Redmine UNEXPECTED ERROR: %s", e, exc_info=True)
         return False, f"Redmine: ошибка проверки ({type(e).__name__}: {e})."
@@ -92,10 +90,18 @@ def _check_matrix_access(homeserver: str, user_id: str, token: str) -> tuple[boo
     logger.info("Homeserver: %s", hs)
     logger.info("User ID: %s", mxid)
     logger.info("Token length: %d", len(access_token))
-    logger.info("Token first 10 chars: %s", repr(access_token[:10]) if access_token else "EMPTY")
+    # ВАЖНО: Выводим токен, чтобы видеть спецсимволы
+    logger.warning(">>> RAW MATRIX TOKEN: %s", repr(access_token))
     
     if not hs or not mxid or not access_token:
         return False, "Matrix: укажите homeserver, user id и token."
+
+    # Проверка на нелатинские символы ДО запроса
+    try:
+        access_token.encode("ascii")
+    except UnicodeEncodeError:
+        logger.error("Matrix token contains non-ASCII chars: %s", repr(access_token))
+        return False, f"Matrix: Токен содержит недопустимые символы (нужен только английский)."
     
     versions_url = f"{hs}/_matrix/client/versions"
     logger.info("Versions URL: %s", versions_url)
@@ -116,7 +122,6 @@ def _check_matrix_access(homeserver: str, user_id: str, token: str) -> tuple[boo
                 headers={"Authorization": f"Bearer {access_token}"},
             )
             logger.info("Whoami status: %d", who_resp.status_code)
-            logger.info("Whoami body: %s", who_resp.text[:200])
             
             if who_resp.status_code != 200:
                 return False, f"Matrix: токен недействителен (HTTP {who_resp.status_code})."
@@ -131,9 +136,6 @@ def _check_matrix_access(homeserver: str, user_id: str, token: str) -> tuple[boo
     except httpx.ConnectError as e:
         logger.error("Matrix ConnectError: %s", e)
         return False, f"Matrix: нет ответа (URL/сеть)."
-    except httpx.RequestError as e:
-        logger.error("Matrix RequestError: %s", e)
-        return False, f"Matrix: ошибка запроса ({type(e).__name__}: {e})."
     except Exception as e:
         logger.error("Matrix UNEXPECTED ERROR: %s", e, exc_info=True)
         return False, f"Matrix: ошибка проверки ({type(e).__name__}: {e})."
