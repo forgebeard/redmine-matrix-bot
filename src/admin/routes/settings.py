@@ -194,6 +194,8 @@ _UNMASKED_SECRETS = {"REDMINE_URL", "MATRIX_HOMESERVER", "MATRIX_USER_ID"}
 
 
 def _check_redmine_access(url: str, api_key: str) -> tuple[bool, str]:
+    import logging
+    logger = logging.getLogger("redmine_bot")
     base = (url or "").strip().rstrip("/")
     key = (api_key or "").strip()
     if not base or not key:
@@ -209,12 +211,15 @@ def _check_redmine_access(url: str, api_key: str) -> tuple[bool, str]:
         login = str((user or {}).get("login") or "").strip()
         suffix = f" (user: {login})" if login else ""
         return True, f"Redmine: подключение успешно{suffix}."
+    except UnicodeEncodeError:
+        return False, "Redmine: API-ключ содержит недопустимые символы (только латиница и цифры)."
     except HTTPError as e:
         return False, f"Redmine: HTTP {e.code}."
-    except URLError:
-        return False, "Redmine: нет ответа (URL/сеть/timeout)."
-    except Exception:
-        return False, "Redmine: ошибка проверки."
+    except URLError as e:
+        return False, f"Redmine: нет ответа ({e.reason})."
+    except Exception as e:
+        logger.error("Redmine check error: %s", e, exc_info=True)
+        return False, f"Redmine: ошибка проверки ({type(e).__name__})."
 
 
 def _check_matrix_access(homeserver: str, user_id: str, token: str) -> tuple[bool, str]:
@@ -236,10 +241,12 @@ def _check_matrix_access(homeserver: str, user_id: str, token: str) -> tuple[boo
         if got_user and got_user != mxid:
             return True, f"Matrix: подключение успешно, но token принадлежит {got_user}."
         return True, "Matrix: подключение успешно."
+    except UnicodeEncodeError:
+        return False, "Matrix: токен содержит недопустимые символы (только латиница и цифры)."
     except HTTPError as e:
         return False, f"Matrix: HTTP {e.code}."
-    except URLError:
-        return False, "Matrix: нет ответа (URL/сеть/timeout)."
+    except URLError as e:
+        return False, f"Matrix: нет ответа ({e.reason})."
     except Exception:
         return False, "Matrix: ошибка проверки."
 
