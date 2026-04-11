@@ -1318,10 +1318,10 @@ pre.log-tail.muted {
 
 /* Settings: service cards + catalog */
 .settings-root {
-  max-width: min(92rem, 100%);
+  max-width: 100%;
 }
 .page-settings--wide {
-  max-width: min(92rem, 100%);
+  max-width: 100%;
 }
 .service-bubbles {
   display: grid;
