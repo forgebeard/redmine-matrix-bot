@@ -11,8 +11,6 @@ from typing import Annotated
 import httpx
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
-from redminelib import Redmine
-from redminelib.exceptions import AuthError, ResourceNotFoundError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -42,17 +40,22 @@ def _check_redmine_access(url: str, api_key: str) -> tuple[bool, str]:
     if not base or not key:
         return False, "Redmine: укажите URL и API-ключ."
     try:
-        rm = Redmine(base, key=key)
-        user = rm.user.get("current")
-        login = getattr(user, "login", "")
-        suffix = f" (user: {login})" if login else ""
-        return True, f"Redmine: подключение успешно{suffix}."
-    except AuthError:
-        return False, "Redmine: неверный API-ключ."
-    except ResourceNotFoundError:
-        return False, "Redmine: пользователь не найден."
-    except Exception as e:
-        return False, f"Redmine: ошибка ({type(e).__name__})."
+        with httpx.Client(timeout=6.0) as client:
+            resp = client.get(
+                f"{base}/users/current.json",
+                headers={"X-Redmine-API-Key": key, "Accept": "application/json"},
+            )
+            if resp.status_code != 200:
+                return False, f"Redmine: HTTP {resp.status_code}."
+            data = resp.json()
+            user = data.get("user") if isinstance(data, dict) else {}
+            login = str((user or {}).get("login") or "").strip()
+            suffix = f" (user: {login})" if login else ""
+            return True, f"Redmine: подключение успешно{suffix}."
+    except httpx.ConnectError:
+        return False, "Redmine: нет ответа (URL/сеть)."
+    except Exception:
+        return False, "Redmine: ошибка проверки."
 
 
 def _check_matrix_access(homeserver: str, user_id: str, token: str) -> tuple[bool, str]:
@@ -62,12 +65,11 @@ def _check_matrix_access(homeserver: str, user_id: str, token: str) -> tuple[boo
     if not hs or not mxid or not access_token:
         return False, "Matrix: укажите homeserver, user id и token."
     try:
-        # 1. Проверка доступности сервера
         with httpx.Client(timeout=6.0) as client:
+            # 1. Проверка доступности сервера
             resp = client.get(f"{hs}/_matrix/client/versions")
             if resp.status_code != 200:
                 return False, f"Matrix: HTTP {resp.status_code}."
-
             # 2. Проверка токена
             who_resp = client.get(
                 f"{hs}/_matrix/client/v3/account/whoami",
@@ -75,7 +77,6 @@ def _check_matrix_access(homeserver: str, user_id: str, token: str) -> tuple[boo
             )
             if who_resp.status_code != 200:
                 return False, f"Matrix: токен недействителен (HTTP {who_resp.status_code})."
-
             data = who_resp.json()
             got_user = data.get("user_id", "")
             if got_user and got_user != mxid:
@@ -83,8 +84,8 @@ def _check_matrix_access(homeserver: str, user_id: str, token: str) -> tuple[boo
             return True, "Matrix: подключение успешно."
     except httpx.ConnectError:
         return False, "Matrix: нет ответа (URL/сеть)."
-    except Exception as e:
-        return False, f"Matrix: ошибка ({type(e).__name__})."
+    except Exception:
+        return False, "Matrix: ошибка проверки."
 
 
 def _mask_secret_value(name: str, value: str) -> str:
