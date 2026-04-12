@@ -2,7 +2,7 @@
 {% from "macros.html" import room_cell, page_head %}
 {% block title %}Пользователи{% endblock %}
 {% block content %}
-{% call page_head("Пользователи", "Поиск, фильтры и группировка по группам.") %}
+{% call page_head("Пользователи") %}
   <span class="page-list-summary" title="С учётом фильтров">В списке: <strong>{{ list_total }}</strong></span>
   <a class="btn btn-primary" href="/users/new"><i class="fa-solid fa-plus"></i> Добавить пользователя </a>
 {% endcall %}
