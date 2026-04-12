@@ -38,7 +38,7 @@ async def secrets_page(
     csrf_token, set_cookie = admin._ensure_csrf(request)
     resp = admin.templates.TemplateResponse(
         request,
-        "secrets.html",
+        "panel/secrets.html",
         {"items": items, "error": None, "csrf_token": csrf_token},
     )
     if set_cookie:

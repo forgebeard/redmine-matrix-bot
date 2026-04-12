@@ -1,10 +1,10 @@
-{% extends "base_auth.html" %}
+{% extends "auth/base_auth.html" %}
 {% block title %}Первичная настройка{% endblock %}
 {% block content %}
   <h1>Первичная настройка</h1>
   <p class="muted">Создайте первого администратора.</p>
   {% if error %}<p class="error">{{ error }}</p>{% endif %}
-  <form class="form" method="post" action="/setup">
+  <form class="auth-form" method="post" action="/setup">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}"/>
     <div class="field">
       <label for="login">Логин</label>

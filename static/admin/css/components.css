@@ -53,7 +53,6 @@ table {
   border-collapse: collapse;
   background: rgba(255, 255, 255, 0.02);
   backdrop-filter: none;
-  border-radius: 1px solid rgba(255, 255, 255, 0.06);
   overflow: hidden;
   border: 1px solid var(--border);
 }

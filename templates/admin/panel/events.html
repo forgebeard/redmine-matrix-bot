@@ -5,7 +5,7 @@
 {% call page_head("События") %}
 {% endcall %}
 
-<form method="get" action="/events" class="card form" style="margin-bottom:1rem;">
+<form method="get" action="/events" class="card form card--mb">
   <div class="filter-row events-filter-row">
     <div class="field events-date-field">
       <label for="date_from">С даты</label>
@@ -42,15 +42,15 @@
 </form>
 
 {% if events_log_truncated %}
-<p class="muted" style="margin-bottom:0.5rem;font-size:0.9rem;">
+<p class="events-note muted">
   <strong>Показан хвост файла</strong> (лимит <code>ADMIN_EVENTS_LOG_SCAN_BYTES</code>); фильтр по датам действует только по загруженному фрагменту.
 </p>
 {% endif %}
 
-<p class="muted" style="margin-bottom:0.75rem;">Всего по фильтру: <strong>{{ total }}</strong>{% if total_pages > 1 %} · страница {{ page }} из {{ total_pages }}{% endif %}</p>
+<p class="events-note muted">Всего по фильтру: <strong>{{ total }}</strong>{% if total_pages > 1 %} · страница {{ page }} из {{ total_pages }}{% endif %}</p>
 
 <div class="card table-wrap">
-  <table class="audit-table">
+  <table>
     <thead>
       <tr>
         <th>Дата</th>
@@ -65,7 +65,7 @@
         <td class="nowrap">{{ row.date_ui }}</td>
         <td class="nowrap">{{ row.time_ui }}</td>
         <td><code>{{ row.level }}</code></td>
-        <td class="audit-detail-cell"><pre class="log-tail audit-json-pre" style="margin:0;white-space:pre-wrap;word-break:break-word;">{{ row.message }}</pre></td>
+        <td><pre class="log-tail">{{ row.message }}</pre></td>
       </tr>
       {% else %}
       <tr><td colspan="4" class="muted">Нет строк</td></tr>
@@ -75,7 +75,7 @@
 </div>
 
 {% if total_pages > 1 %}
-<nav class="pagination card" style="margin-top:1rem;padding:0.75rem 1rem;display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;" aria-label="Страницы">
+<nav class="pagination card" aria-label="Страницы">
   {% if page > 1 %}
   <a class="btn btn-ghost" href="{{ events_filter_link_prefix }}page={{ page - 1 }}">← Назад</a>
   {% endif %}

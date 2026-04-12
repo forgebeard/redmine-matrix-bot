@@ -116,7 +116,7 @@ async def routes_version(
     rows = list(r.scalars().all())
     return admin.templates.TemplateResponse(
         request,
-        "routes_version.html",
+        "panel/routes_version.html",
         {"rows": rows},
     )
 

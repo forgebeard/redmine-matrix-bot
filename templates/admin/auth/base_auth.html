@@ -4,18 +4,15 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>{% block title %}Вход{% endblock %} — Via</title>
-  <script src="https://unpkg.com/htmx.org@2.0.4"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.6.0/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer"/>
   <link rel="preconnect" href="https://fonts.googleapis.com"/>
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="/static/admin/css/base.css?v={{ asset_version() }}"/>
   <link rel="stylesheet" href="/static/admin/css/auth.css?v={{ asset_version() }}"/>
-  {% if csrf_token is defined and csrf_token %}
-  <meta name="csrf-token" content="{{ csrf_token }}"/>
-  {% endif %}
   {% block head_extra %}{% endblock %}
 </head>
-<body>
+<body class="auth-body">
   <div class="auth-wrap">
     <div class="auth-card">
       <div class="auth-logo auth-logo--via" aria-hidden="true">
@@ -26,13 +23,5 @@
       {% block content %}{% endblock %}
     </div>
   </div>
-  <script>
-    document.body.addEventListener('htmx:configRequest', function (event) {
-      var meta = document.querySelector('meta[name="csrf-token"]');
-      if (meta && meta.content) {
-        event.detail.headers['X-CSRF-Token'] = meta.content;
-      }
-    });
-  </script>
 </body>
 </html>

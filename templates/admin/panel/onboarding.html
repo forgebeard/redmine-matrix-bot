@@ -5,12 +5,12 @@
 {{ page_head("Настройки") }}
 {% if error %}<p class="error">{{ error }}</p>{% endif %}
 <div class="page-settings page-settings--wide">
-  <form class="form form--settings" method="post" action="/onboarding/save" style="margin-top:0;" id="settings-form">
+  <form class="form form--settings" method="post" action="/onboarding/save" id="settings-form">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}"/>
     <input type="hidden" id="catalog_notify_json" name="catalog_notify_json" value='{{ notify_catalog|tojson }}'/>
     <input type="hidden" id="catalog_versions_json" name="catalog_versions_json" value='{{ versions_catalog|tojson }}'/>
 
-    <div class="settings-head-row">
+    <div class="section-header section-header--action">
       <h2>Параметры сервиса</h2>
       <div class="service-actions">
         <button class="btn btn-primary" type="submit">Сохранить</button>
@@ -71,13 +71,13 @@
       </section>
     </div>
 
-    <p id="check-access-status" class="muted" style="margin:0.4rem 0 0;" aria-live="polite"></p>
+    <p id="check-access-status" class="muted form-status" aria-live="polite"></p>
 
     {% if saved == "connections" %}
-    <p class="muted" style="margin:0.4rem 0 0;">Подключения сохранены.</p>
+    <p class="muted form-status">Подключения сохранены.</p>
     {% endif %}
 
-    <div class="section-header-with-action">
+    <div class="section-header section-header--action">
       <h2>База данных сервиса</h2>
       <button class="btn btn-ghost" type="button" id="regenerate-db-credentials">Сгенерировать новые</button>
     </div>
@@ -110,7 +110,7 @@
           </div>
         </div>
       </div>
-      <p id="db-regenerate-status" class="muted" style="margin:0.75rem 0 0;" aria-live="polite"></p>
+      <p id="db-regenerate-status" class="muted form-status form-status--db" aria-live="polite"></p>
     </section>
 
     <div class="section-header">
@@ -133,7 +133,7 @@
     <div class="section-header">
       <h2>Справочник</h2>
     </div>
-    <p id="catalog-save-status" class="muted" style="margin:0.2rem 0 0.65rem;" aria-live="polite"></p>
+    <p id="catalog-save-status" class="muted form-status form-status--catalog" aria-live="polite"></p>
     <div class="catalog-grid">
       <section class="service-bubble">
         <div class="catalog-list" id="notify-list"></div>

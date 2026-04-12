@@ -57,7 +57,7 @@ async def _dashboard_page(request: Request, session: AsyncSession):
     )
     return admin.templates.TemplateResponse(
         request,
-        "index.html",
+        "panel/dashboard.html",
         {
             "runtime_status": {"cycle": runtime_file},
             "service_ctx": service_ctx,

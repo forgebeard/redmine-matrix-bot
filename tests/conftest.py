@@ -5,11 +5,13 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Generator
 from datetime import date, timedelta
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from fastapi.testclient import TestClient
 
 # До импорта admin_main / database.session (иначе engine создастся без NullPool).
 os.environ.setdefault("SQLALCHEMY_NULL_POOL", "1")
@@ -17,6 +19,66 @@ os.environ.setdefault("SQLALCHEMY_NULL_POOL", "1")
 # Не писать лог в data/bot.log во время pytest — иначе админка «События» показывает
 # строки из тестов (!room:server, Matrix send failed из моков и т.д.).
 os.environ["LOG_TO_FILE"] = "0"
+
+# Для password auth и encrypted-secrets на старте нужен master key.
+os.environ.setdefault("APP_MASTER_KEY", "0123456789abcdef0123456789abcdef")
+
+# Отключаем rate limiter до импорта admin_main (иначе _rate_limiter инициализируется до тестов)
+os.environ["ADMIN_DISABLE_RATE_LIMITS"] = "1"
+
+# Тесты /setup и /login не должны зависеть от локального ADMIN_LOGINS в окружении разработчика.
+os.environ.pop("ADMIN_LOGINS", None)
+
+
+# ── Фикстура TestClient ────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def client() -> Generator[TestClient, None, None]:
+    """TestClient для admin-приложения. Используется всеми интеграционными тестами."""
+    # Импорт здесь чтобы избежать ранней инициализации engine.
+    import admin.main as admin_main  # noqa: PLC0415
+
+    with TestClient(admin_main.app) as c:
+        yield c
+
+
+# ── Хелпер: создать админа и войти ──────────────────────────────────────
+
+
+def _setup_and_login_admin(
+    client: TestClient, login: str = "test_admin@example.com", password: str = "StrongPassword123"
+) -> None:
+    """Создаёт первого админа через /setup и входит через /login.
+
+    На одной БД несколько тестов: первый создаёт админа, остальные получают 409.
+    """
+    client.get("/setup", follow_redirects=True)
+    token = client.cookies.get("admin_csrf")
+    created = client.post(
+        "/setup",
+        data={
+            "login": login,
+            "password": password,
+            "password_confirm": password,
+            "csrf_token": token,
+        },
+        follow_redirects=False,
+    )
+    assert created.status_code in (302, 303, 409), created.status_code
+    client.get("/login")
+    ltoken = client.cookies.get("admin_csrf")
+    logged = client.post(
+        "/login",
+        data={"login": login, "password": password, "csrf_token": ltoken},
+        follow_redirects=False,
+    )
+    if logged.status_code == 401:
+        pytest.skip(
+            "Вход тестового admin не удался (в БД другой пароль или нет пользователя). "
+            "Используйте чистую БД или задайте учётные данные под вашу БД."
+        )
+    assert logged.status_code in (302, 303), logged.status_code
 
 
 # ── Вспомогательные классы ──────────────────────────────────────────────

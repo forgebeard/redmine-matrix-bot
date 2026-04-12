@@ -1,45 +1,70 @@
 /* ===========================
-   base.css — переменные, reset, body, типографика
+   base.css — переменные, reset, body, типографика, утилиты
+   Подключается ВЕЗДЕ (и auth, и panel)
    =========================== */
 
+/* ---------- Design tokens ---------- */
 :root {
-  --bg: #030712;
-  --bg-sidebar: #0f172a;
-  --bg-main: #151b23;
-  --bg-input: #0d1117;
-  --fg: #e5e7eb;
-  --muted: #9ca3af;
-  --cyan: #06b6d4;
-  --cyan-dim: rgba(6, 182, 212, 0.12);
+  /* Surfaces */
+  --bg:          #030712;
+  --bg-deep:     #030712;
+  --bg-sidebar:  #0f172a;
+  --bg-main:     #151b23;
+  --bg-input:    #0d1117;
+  --fg:          #e5e7eb;
+  --muted:       #9ca3af;
+
+  /* Accent */
+  --cyan:        #06b6d4;
+  --cyan-dim:    rgba(6, 182, 212, 0.12);
+  --primary:     var(--cyan);
+
+  /* Semantic */
+  --danger:        #f87171;
+  --warning-bg:    rgba(250, 204, 21, 0.12);
+  --warning-border:rgba(250, 204, 21, 0.45);
+
+  /* Surfaces / glass */
   --border: rgba(255, 255, 255, 0.06);
-  --glass: rgba(255, 255, 255, 0.02);
-  --primary: var(--cyan);
-  --danger: #f87171;
-  --warning-bg: rgba(250, 204, 21, 0.12);
-  --warning-border: rgba(250, 204, 21, 0.45);
+  --glass:  rgba(255, 255, 255, 0.02);
+
+  /* Radii */
   --radius: 0.75rem;
-  --sidebar-w: 18rem;
-  --font-main: 1.15rem;
-  --control-pad-y: 0.8rem;
-  --control-pad-x: 1rem;
-  --control-min-h: 3.25rem;
-  --content-form-max: min(56rem, 100%);
-  --content-table-max: min(85rem, 100%);
-  --choice-surface: rgba(15, 23, 42, 0.5);
-  --choice-border: var(--border);
-  --choice-radius-pill: 999px;
-  --choice-radius-soft: 0.65rem;
-  --choice-active-bg: rgba(6, 182, 212, 0.14);
+
+  /* Choice controls (pills, chips, radio-cards) */
+  --choice-surface:       rgba(15, 23, 42, 0.5);
+  --choice-border:        var(--border);
+  --choice-radius-pill:   999px;
+  --choice-radius-soft:   0.65rem;
+  --choice-active-bg:     rgba(6, 182, 212, 0.14);
   --choice-active-border: rgba(6, 182, 212, 0.5);
+
+  /* Layout */
+  --sidebar-w:         18rem;
+  --font-main:         1.15rem;
+  --control-pad-y:     0.8rem;
+  --control-pad-x:     1rem;
+  --control-min-h:     3.25rem;
+  --content-form-max:  min(56rem, 100%);
+  --content-table-max: min(85rem, 100%);
 }
 
-* { box-sizing: border-box; }
+/* ---------- Reset ---------- */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
 
+/* ---------- Root font size ---------- */
 html {
   font-size: 112%;
   scroll-behavior: smooth;
 }
 
+@media (max-width: 768px) {
+  html { font-size: 100%; }
+}
+
+/* ---------- Body ---------- */
 body {
   margin: 0;
   min-height: 100vh;
@@ -50,10 +75,45 @@ body {
   line-height: 1.55;
 }
 
-h1 { margin: 0 0 0.75rem; font-size: 2.125rem; font-weight: 600; letter-spacing: -0.02em; }
-h2 { margin: 0 0 0.5rem; font-size: 1.35rem; font-weight: 600; }
+/* ---------- Typography ---------- */
+h1 {
+  margin: 0 0 0.75rem;
+  font-size: 2.125rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
 
-code { background: rgba(255,255,255,0.06); padding: 0.12rem 0.35rem; border-radius: 4px; font-size: 0.88em; }
+h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1.35rem;
+  font-weight: 600;
+}
+
+code {
+  background: rgba(255, 255, 255, 0.06);
+  padding: 0.12rem 0.35rem;
+  border-radius: 4px;
+  font-size: 0.88em;
+}
+
+/* ---------- Utility classes ---------- */
+.muted  { color: var(--muted); font-size: 1rem; }
+.error  { color: var(--danger); }
+
+.warning {
+  border: 1px solid var(--warning-border);
+  background: var(--warning-bg);
+  border-radius: var(--radius);
+  padding: 0.85rem 1rem;
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+}
+.warning a { color: var(--cyan); }
+
+.stack {
+  display: grid;
+  gap: 1.15rem;
+}
 
 .mono-truncate {
   display: inline-block;
@@ -66,28 +126,19 @@ code { background: rgba(255,255,255,0.06); padding: 0.12rem 0.35rem; border-radi
   font-size: 0.85em;
 }
 
-.muted { color: var(--muted); font-size: 1rem; }
-.error { color: var(--danger); }
-
-.warning {
-  border: 1px solid var(--warning-border);
-  background: var(--warning-bg);
-  border-radius: var(--radius);
-  padding: 0.85rem 1rem;
-  margin-bottom: 1rem;
-  font-size: 0.9rem;
-}
-.warning a { color: var(--cyan); }
-
+/* ---------- Flash dismiss ---------- */
 .ops-flash {
   transition: opacity 0.35s ease, transform 0.35s ease;
 }
+
 .ops-flash.ops-flash--dismissed {
   opacity: 0;
   transform: translateY(-4px);
   pointer-events: none;
 }
 
-.stack { display: grid; gap: 1.15rem; }
-
-@keyframes fadeIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
+/* ---------- Shared keyframes ---------- */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}

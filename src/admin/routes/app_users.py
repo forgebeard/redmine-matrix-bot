@@ -39,7 +39,7 @@ async def app_users_page(
     csrf_token, set_cookie = admin._ensure_csrf(request)
     resp = admin.templates.TemplateResponse(
         request,
-        "app_users.html",
+        "panel/app_users.html",
         {"users": users, "csrf_token": csrf_token},
     )
     if set_cookie:
@@ -78,7 +78,7 @@ async def app_user_reset_password_admin(
         csrf_out, set_cookie = admin._ensure_csrf(request)
         resp = admin.templates.TemplateResponse(
             request,
-            "app_users.html",
+            "panel/app_users.html",
             {
                 "users": users,
                 "csrf_token": csrf_out,
@@ -131,7 +131,7 @@ async def app_user_change_login_admin(
         csrf_out, set_cookie = admin._ensure_csrf(request)
         resp = admin.templates.TemplateResponse(
             request,
-            "app_users.html",
+            "panel/app_users.html",
             {
                 "users": users,
                 "csrf_token": csrf_out,

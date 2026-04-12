@@ -135,7 +135,7 @@ async def events_page(
     admin = _admin()
     return admin.templates.TemplateResponse(
         request,
-        "events.html",
+        "panel/events.html",
         {
             "rows": page_rows,
             "total": total,

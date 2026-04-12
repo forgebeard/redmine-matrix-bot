@@ -1,33 +1,14 @@
-:root {
-  --bg-deep: #030712;
-  --fg: #e5e7eb;
-  --muted: #9ca3af;
-  --cyan: #06b6d4;
-  --cyan-dim: rgba(6, 182, 212, 0.15);
-  --border: rgba(255, 255, 255, 0.08);
-  --glass: rgba(255, 255, 255, 0.05);
-  --danger: #f87171;
-  --radius: 1rem;
-}
-* { box-sizing: border-box; }
-/* Тот же базовый масштаб, что и в panel.css (вход, setup, сброс пароля) */
-html {
-  font-size: 115%;
-}
-@media (max-width: 768px) {
-  html {
-    font-size: 100%;
-  }
-}
-body {
-  margin: 0;
-  min-height: 100vh;
-  font-family: Inter, system-ui, sans-serif;
+/* ===========================
+   auth.css — login, register, reset-password, setup
+   Подключается ТОЛЬКО на auth-страницах
+   =========================== */
+
+/* ---------- Auth body override ---------- */
+body.auth-body {
   background: linear-gradient(145deg, #0f172a 0%, var(--bg-deep) 45%, #000 100%);
-  color: var(--fg);
-  font-size: 1rem;
-  line-height: 1.55;
 }
+
+/* ---------- Auth wrapper ---------- */
 .auth-wrap {
   min-height: 100vh;
   min-height: 100dvh;
@@ -35,10 +16,11 @@ body {
   align-items: center;
   justify-content: center;
   padding: 1rem 1.25rem;
-  /* Карточка выше экрана (крупный шрифт / мало высоты) — прокрутка, а не обрезка снизу */
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
 }
+
+/* ---------- Auth card ---------- */
 .auth-card {
   width: 100%;
   max-width: 36rem;
@@ -51,10 +33,10 @@ body {
   -webkit-backdrop-filter: blur(14px);
   border: 1px solid var(--border);
   box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
-  /* Заголовок и подзаголовок по центру (как логотип); поля формы — слева */
   text-align: center;
 }
-/* Тот же знак, что в сайдбаре панели (Via) — жёсткие пределы, иначе SVG без бокса может разъехаться на части браузеров */
+
+/* ---------- Auth logo (Via mark) ---------- */
 .auth-logo--via {
   width: 4rem;
   height: 4rem;
@@ -71,6 +53,7 @@ body {
   overflow: hidden;
   box-shadow: 0 10px 32px rgba(47, 131, 226, 0.28);
 }
+
 .auth-logo--via svg,
 .auth-v-mark {
   display: block;
@@ -80,31 +63,57 @@ body {
   max-height: 62%;
   flex: 0 0 auto;
 }
-h1 { margin: 0 0 0.5rem; font-size: 1.75rem; font-weight: 600; }
-.muted { color: var(--muted); font-size: 1rem; margin: 0 0 1rem; }
-.error { color: var(--danger); margin: 0.5rem 0; }
-label { display: block; font-weight: 500; font-size: 1rem; text-align: left; }
-.form {
+
+/* ---------- Auth typography ---------- */
+.auth-card h1 {
+  margin: 0 0 0.5rem;
+  font-size: 1.75rem;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+.auth-card .muted {
+  font-size: 1rem;
+  margin: 0 0 1rem;
+}
+
+.auth-card .error {
+  margin: 0.5rem 0;
+}
+
+/* ---------- Auth form ---------- */
+.auth-form {
   display: flex;
   flex-direction: column;
   gap: 1.125rem;
   text-align: left;
 }
-.form label { margin-top: 0; }
-.field {
+
+.auth-form label {
+  display: block;
+  font-weight: 500;
+  font-size: 1rem;
+  text-align: left;
+}
+
+.auth-form .field {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
 }
-.field-hint {
+
+.auth-form .field-hint {
   margin: 0;
   font-size: 0.95rem;
   color: var(--muted);
   line-height: 1.5;
 }
-input, textarea, select {
+
+/* ---------- Auth inputs (larger than default) ---------- */
+.auth-card input,
+.auth-card textarea,
+.auth-card select {
   width: 100%;
-  margin-top: 0;
   padding: 0.75rem 0.95rem;
   min-height: 3rem;
   border-radius: 0.65rem;
@@ -112,13 +121,19 @@ input, textarea, select {
   background: rgba(15, 23, 42, 0.6);
   color: var(--fg);
   font-size: 1.0625rem;
+  font-family: inherit;
 }
-input:focus, textarea:focus, select:focus {
+
+.auth-card input:focus,
+.auth-card textarea:focus,
+.auth-card select:focus {
   outline: none;
   border-color: var(--cyan);
   box-shadow: 0 0 0 3px var(--cyan-dim);
 }
-.btn {
+
+/* ---------- Auth buttons (larger than default) ---------- */
+.auth-card .btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -132,25 +147,35 @@ input:focus, textarea:focus, select:focus {
   text-decoration: none;
   min-height: 3rem;
 }
-.btn-primary {
+
+.auth-card .btn-primary {
   background: linear-gradient(135deg, var(--cyan), #0891b2);
   color: #fff;
   width: 100%;
   padding: 0.85rem 1rem;
 }
-.form > .btn-primary { margin-top: 0; }
-.btn-primary:hover { filter: brightness(1.08); }
-.btn:focus-visible {
+
+.auth-card .btn-primary:hover {
+  filter: brightness(1.08);
+}
+
+.auth-card .btn:focus-visible {
   outline: 2px solid var(--cyan);
   outline-offset: 2px;
 }
-.btn-ghost {
+
+.auth-card .btn-ghost {
   background: transparent;
   color: var(--muted);
   border: 1px solid var(--border);
 }
-.btn-ghost:hover { color: var(--fg); border-color: var(--cyan); }
-.card { /* совместимость с вложенными блоками */ }
+
+.auth-card .btn-ghost:hover {
+  color: var(--fg);
+  border-color: var(--cyan);
+}
+
+/* ---------- Auth links ---------- */
 .auth-links {
   display: flex;
   gap: 1rem;
@@ -159,14 +184,18 @@ input:focus, textarea:focus, select:focus {
   font-size: 0.88rem;
   justify-content: center;
 }
-.auth-links a { color: var(--cyan); text-decoration: none; }
-.auth-links a:hover { text-decoration: underline; }
 
+.auth-links a {
+  color: var(--cyan);
+  text-decoration: none;
+}
+
+.auth-links a:hover {
+  text-decoration: underline;
+}
+
+/* ---------- Low viewport ---------- */
 @media (max-height: 720px) {
-  /* На низком окне уменьшаем корневой масштаб — иначе 115% + крупные поля не влезают */
-  html {
-    font-size: 100%;
-  }
   .auth-logo--via {
     width: 3rem;
     height: 3rem;
@@ -174,18 +203,22 @@ input:focus, textarea:focus, select:focus {
     max-height: min(3rem, 20vw);
     margin-bottom: 0.85rem;
   }
+
   .auth-logo--via svg,
   .auth-v-mark {
     width: 1.75rem;
     height: 1.75rem;
   }
+
   .auth-card {
     padding: 1.35rem 1.5rem;
   }
-  h1 {
+
+  .auth-card h1 {
     font-size: 1.45rem;
   }
-  .muted {
+
+  .auth-card .muted {
     margin-bottom: 0.75rem;
   }
 }

@@ -52,7 +52,7 @@ async def login_page(request: Request):
         can_register_admin = False
     resp = templates.TemplateResponse(
         request,
-        "login.html",
+        "auth/login.html",
         {"error": None, "csrf_token": csrf_token, "can_register_admin": can_register_admin},
     )
     if set_cookie:
@@ -68,7 +68,7 @@ async def setup_page(request: Request, session: AsyncSession = Depends(get_sessi
         return RedirectResponse("/login", status_code=303)
     csrf_token, set_cookie = _ensure_csrf(request)
     resp = templates.TemplateResponse(
-        request, "setup.html", {"error": None, "csrf_token": csrf_token}
+        request, "auth/setup.html", {"error": None, "csrf_token": csrf_token}
     )
     if set_cookie:
         resp.set_cookie(
@@ -91,12 +91,12 @@ async def setup_post(
     fmt_ok, fmt_err = _login_format_ok(login_n)
     if not fmt_ok:
         return templates.TemplateResponse(
-            request, "setup.html", {"error": fmt_err, "csrf_token": csrf_token}, status_code=400
+            request, "auth/setup.html", {"error": fmt_err, "csrf_token": csrf_token}, status_code=400
         )
     if not _login_allowed(login_n):
         return templates.TemplateResponse(
             request,
-            "setup.html",
+            "auth/setup.html",
             {
                 "error": "Этот логин не разрешён (проверьте ADMIN_LOGINS в окружении).",
                 "csrf_token": csrf_token,
@@ -106,14 +106,14 @@ async def setup_post(
     if (password or "") != (password_confirm or ""):
         return templates.TemplateResponse(
             request,
-            "setup.html",
+            "auth/setup.html",
             {"error": "Пароли не совпадают", "csrf_token": csrf_token},
             status_code=400,
         )
     ok, reason = validate_password_policy(password, login=login_n)
     if not ok:
         return templates.TemplateResponse(
-            request, "setup.html", {"error": reason, "csrf_token": csrf_token}, status_code=400
+            request, "auth/setup.html", {"error": reason, "csrf_token": csrf_token}, status_code=400
         )
     await session.execute(select(BotAppUser.id).where(BotAppUser.role == "admin").with_for_update())
     any_admin = await session.execute(
@@ -122,7 +122,7 @@ async def setup_post(
     if any_admin.scalar_one_or_none() is not None:
         return templates.TemplateResponse(
             request,
-            "setup.html",
+            "auth/setup.html",
             {"error": "Администратор уже создан", "csrf_token": csrf_token},
             status_code=409,
         )
@@ -154,7 +154,7 @@ async def login_post(
     if not login_n or not password:
         return templates.TemplateResponse(
             request,
-            "login.html",
+            "auth/login.html",
             {"error": _generic_login_error(), "csrf_token": csrf_token},
             status_code=401,
         )
@@ -162,7 +162,7 @@ async def login_post(
     if not fmt_ok or not _login_allowed(login_n):
         return templates.TemplateResponse(
             request,
-            "login.html",
+            "auth/login.html",
             {"error": _generic_login_error(), "csrf_token": csrf_token},
             status_code=401,
         )
@@ -171,7 +171,7 @@ async def login_post(
     if not user or not user.password_hash or not verify_password(user.password_hash, password):
         return templates.TemplateResponse(
             request,
-            "login.html",
+            "auth/login.html",
             {"error": _generic_login_error(), "csrf_token": csrf_token},
             status_code=401,
         )
@@ -214,7 +214,7 @@ async def forgot_password_post():
 async def reset_password_page(request: Request, token: str = ""):
     csrf_token, set_cookie = _ensure_csrf(request)
     resp = templates.TemplateResponse(
-        request, "reset_password.html", {"error": None, "token": token, "csrf_token": csrf_token}
+        request, "auth/reset_password.html", {"error": None, "token": token, "csrf_token": csrf_token}
     )
     if set_cookie:
         resp.set_cookie(
@@ -236,7 +236,7 @@ async def reset_password_post(
     if not token or not password:
         return templates.TemplateResponse(
             request,
-            "reset_password.html",
+            "auth/reset_password.html",
             {"error": "Неверный или просроченный токен", "token": token, "csrf_token": csrf_token},
             status_code=401,
         )
@@ -252,7 +252,7 @@ async def reset_password_post(
     if not rt:
         return templates.TemplateResponse(
             request,
-            "reset_password.html",
+            "auth/reset_password.html",
             {"error": "Неверный или просроченный токен", "token": token, "csrf_token": csrf_token},
             status_code=401,
         )
@@ -264,7 +264,7 @@ async def reset_password_post(
     if not ok:
         return templates.TemplateResponse(
             request,
-            "reset_password.html",
+            "auth/reset_password.html",
             {"error": reason, "token": token, "csrf_token": csrf_token},
             status_code=400,
         )

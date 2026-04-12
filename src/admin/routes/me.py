@@ -42,7 +42,7 @@ async def me_settings_get(
     if redmine_id is None:
         resp = admin.templates.TemplateResponse(
             request,
-            "my_settings.html",
+            "panel/my_settings.html",
             {
                 "room": None,
                 "notify_json": '["all"]',
@@ -90,7 +90,7 @@ async def me_settings_get(
 
     resp = admin.templates.TemplateResponse(
         request,
-        "my_settings.html",
+        "panel/my_settings.html",
         {
             "room": bot_user.room,
             "notify_json": json.dumps(bot_user.notify, ensure_ascii=False)

@@ -322,7 +322,7 @@ async def onboarding_page(request: Request, session: AsyncSession = Depends(get_
 
     return admin.templates.TemplateResponse(
         request,
-        "onboarding.html",
+        "panel/onboarding.html",
         {
             "secrets_raw": secrets_raw,
             "secrets_masked": secrets_masked,

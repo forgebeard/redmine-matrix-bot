@@ -81,7 +81,7 @@ async def users_list(
 
     return admin.templates.TemplateResponse(
         request,
-        "users_list.html",
+        "panel/users_list.html",
         {
             "users": rows,
             "grouped_users": grouped,
@@ -113,7 +113,7 @@ async def users_new(
     matrix_domain = await admin._get_matrix_domain_from_db(session)
     return admin.templates.TemplateResponse(
         request,
-        "user_form.html",
+        "panel/user_form.html",
         {
             "title": "Новый пользователь",
             "u": None,
@@ -435,7 +435,7 @@ async def users_edit(
     selected_versions = [r.version_key for r in version_rows if r.version_key in version_set]
     return admin.templates.TemplateResponse(
         request,
-        "user_form.html",
+        "panel/user_form.html",
         {
             "title": f"Пользователь Redmine {row.redmine_id}",
             "u": row,

@@ -11,20 +11,9 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
-# Для password auth и encrypted-secrets на старте нужен master key.
-os.environ.setdefault("APP_MASTER_KEY", "0123456789abcdef0123456789abcdef")
-# Тесты /setup и /login не должны зависеть от локального ADMIN_LOGINS в окружении разработчика.
-os.environ.pop("ADMIN_LOGINS", None)
-# Отключаем rate limiter до импорта admin_main (иначе _rate_limiter инициализируется до тестов)
-os.environ["ADMIN_DISABLE_RATE_LIMITS"] = "1"
-
 import admin.main as admin_main  # noqa: E402
 
-
-@pytest.fixture
-def client() -> Generator[TestClient, None, None]:
-    with TestClient(admin_main.app) as c:
-        yield c
+from tests.conftest import _setup_and_login_admin
 
 
 def test_audit_legacy_redirects_unauthenticated(client: TestClient):
@@ -99,7 +88,7 @@ def test_admin_asset_version_helper(monkeypatch):
 
 
 def test_static_admin_css_served(client: TestClient):
-    r = client.get("/static/admin/css/panel.css")
+    r = client.get("/static/admin/css/base.css")
     assert r.status_code == 200
     assert "text/css" in (r.headers.get("content-type") or "")
     assert b":root" in r.content
@@ -289,38 +278,6 @@ def test_users_redirects_to_login_without_auth(client: TestClient):
     loc = r.headers.get("location", "")
     # Пустая БД: первый шаг — /setup; если админ уже есть — /login.
     assert loc.endswith("/login") or loc.endswith("/setup"), loc
-
-
-def _setup_and_login_admin(
-    client: TestClient, login: str = "test_admin@example.com", password: str = "StrongPassword123"
-) -> None:
-    client.get("/setup", follow_redirects=True)
-    token = client.cookies.get("admin_csrf")
-    created = client.post(
-        "/setup",
-        data={
-            "login": login,
-            "password": password,
-            "password_confirm": password,
-            "csrf_token": token,
-        },
-        follow_redirects=False,
-    )
-    # На одной БД несколько тестов: первый создаёт админа, остальные получают 409.
-    assert created.status_code in (302, 303, 409), created.status_code
-    client.get("/login")
-    ltoken = client.cookies.get("admin_csrf")
-    logged = client.post(
-        "/login",
-        data={"login": login, "password": password, "csrf_token": ltoken},
-        follow_redirects=False,
-    )
-    if logged.status_code == 401:
-        pytest.skip(
-            "Вход тестового admin не удался (в БД другой пароль или нет пользователя). "
-            "Используйте чистую БД или задайте учётные данные под вашу БД."
-        )
-    assert logged.status_code in (302, 303), logged.status_code
 
 
 def test_onboarding_page_copy(client: TestClient):

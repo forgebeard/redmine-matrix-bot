@@ -20,7 +20,7 @@
               <input id="room_id" name="room_id" value="{{ g.room_id if g else '' }}" placeholder="!group-room:server" {% if not g %}required{% endif %}/>
             </div>
           </div>
-          <div class="inline-actions" style="margin-top:0.5rem; display:flex; flex-wrap:wrap; gap:0.5rem; align-items:center;">
+          <div class="inline-actions">
             <button type="button" class="btn btn-ghost" id="group_test_message_btn"
                     data-room-id="{{ g.room_id if g and g.room_id else '' }}">Отправить тестовое сообщение</button>
             <span id="group_test_status" class="muted" role="status" aria-live="polite"></span>
@@ -127,7 +127,7 @@
 
       <aside>
         <article class="card user-form-summary">
-          <h2 style="margin-top:0;">Краткий итог</h2>
+          <h2 class="card__title--flush">Краткий итог</h2>
           <div class="summary-line"><span class="k">Группа</span><span class="v" id="summary_group_name">—</span></div>
           <div class="summary-line"><span class="k">Комната</span><span class="v" id="summary_group_room">—</span></div>
           <div class="summary-line"><span class="k">Таймзона</span><span class="v" id="summary_group_tz">—</span></div>
@@ -135,9 +135,9 @@
           <div class="summary-line"><span class="k">Версии</span><span class="v" id="summary_group_versions">—</span></div>
           <div class="summary-line"><span class="k">Часы</span><span class="v" id="summary_group_hours">—</span></div>
           <div class="summary-line"><span class="k">Отключить уведомления группы</span><span class="v" id="summary_group_dnd">—</span></div>
-          <div class="page-actions" style="margin-top:1rem;">
-            <button class="btn btn-primary" type="submit" style="width:100%;">Сохранить</button>
-            <a class="btn btn-ghost" href="/groups" style="width:100%;">Отмена</a>
+          <div class="page-actions page-actions--mt">
+            <button class="btn btn-primary btn--full" type="submit">Сохранить</button>
+            <a class="btn btn-ghost btn--full" href="/groups">Отмена</a>
           </div>
         </article>
       </aside>

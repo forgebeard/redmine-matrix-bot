@@ -15,24 +15,43 @@
 
 <div class="grid-stats">
   <a class="card stat-card stat-card--link" href="/users" aria-label="Пользователи: {{ dash.user_count }}">
-    <div class="stat-label">Пользователи</div>
-    <div class="stat-value">{{ dash.user_count }}</div>
-    <i class="fa-solid fa-users stat-icon" aria-hidden="true"></i>
+    <div>
+      <div class="stat-label">Пользователи</div>
+      <div class="stat-value">{{ dash.user_count }}</div>
+    </div>
+    <span class="stat-icon-svg" aria-hidden="true">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+    </span>
   </a>
+
   <a class="card stat-card stat-card--link" href="/groups" aria-label="Группы: {{ dash.group_count }}">
-    <div class="stat-label">Группы</div>
-    <div class="stat-value">{{ dash.group_count }}</div>
-    <i class="fa-solid fa-layer-group stat-icon" aria-hidden="true"></i>
+    <div>
+      <div class="stat-label">Группы</div>
+      <div class="stat-value">{{ dash.group_count }}</div>
+    </div>
+    <span class="stat-icon-svg" aria-hidden="true">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="10" x2="20" y2="10"/><line x1="4" y1="14" x2="20" y2="14"/><line x1="4" y1="18" x2="20" y2="18"/></svg>
+    </span>
   </a>
-  <a class="card stat-card stat-card--link stat-card--no-value" href="/events" aria-label="События" title="Открыть журнал событий">
+
+  <a class="card stat-card stat-card--link stat-card--events" href="/events" aria-label="События" title="Открыть журнал событий">
+    <span class="stat-icon-svg stat-icon-svg--center" aria-hidden="true">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+    </span>
     <div class="stat-label">События</div>
-    <i class="fa-solid fa-bolt stat-icon" aria-hidden="true"></i>
+    {% set cycle = runtime_status.cycle or {} %}
+    {% set err_n = cycle.error_count or 0 %}
+    {% if err_n %}
+      <span class="events-badge events-badge--error"><span class="events-badge-dot"></span> Ошибки: {{ err_n }}</span>
+    {% else %}
+      <span class="events-badge events-badge--ok"><span class="events-badge-dot"></span> Ошибок нет</span>
+    {% endif %}
   </a>
 </div>
 
 <div class="demo-grid">
   <article class="card demo-card">
-    <h2 style="margin-top:0;">Что сделать сейчас</h2>
+    <h2>Что сделать сейчас</h2>
     <ul class="demo-list">
       {% if integration_status.configured %}
       <li><strong>Подключения:</strong> обязательные секреты заданы.</li>
@@ -57,7 +76,7 @@
   </article>
 
   <article class="card demo-card demo-card--service">
-    <h2 style="margin-top:0;">Сервис</h2>
+    <h2>Сервис</h2>
     <div class="bot-status-bar" id="bot-status-bar">
       <span class="bot-status-dot bot-status-dot--unknown" id="bot-status-dot"></span>
       <span class="bot-status-text" id="bot-status-text">Загрузка статуса...</span>
@@ -73,15 +92,15 @@
       <div class="service-actions-grid">
         <form method="post" action="/ops/bot/start">
           <input type="hidden" name="csrf_token" value="{{ request.state._state.get('csrf_token', '') }}"/>
-          <button class="btn btn-ghost service-action-btn" type="submit"><i class="fa-solid fa-play"></i> Старт</button>
+          <button class="btn-control btn-start service-action-btn" type="submit"><span class="control-icon">▶</span> Старт</button>
         </form>
         <form method="post" action="/ops/bot/stop" hx-confirm="Остановить бота?">
           <input type="hidden" name="csrf_token" value="{{ request.state._state.get('csrf_token', '') }}"/>
-          <button class="btn btn-danger service-action-btn" type="submit"><i class="fa-solid fa-stop"></i> Стоп</button>
+          <button class="btn-control btn-stop service-action-btn" type="submit"><span class="control-icon">■</span> Стоп</button>
         </form>
         <form method="post" action="/ops/bot/restart" hx-confirm="Перезапустить бота?">
           <input type="hidden" name="csrf_token" value="{{ request.state._state.get('csrf_token', '') }}"/>
-          <button class="btn btn-primary service-action-btn" type="submit"><i class="fa-solid fa-rotate-right"></i> Рестарт</button>
+          <button class="btn-control btn-restart service-action-btn" type="submit">↻ Рестарт</button>
         </form>
       </div>
     </div>

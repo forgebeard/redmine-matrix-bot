@@ -54,7 +54,7 @@ async def groups_list(
     rows = [r for r in _all_groups if r.name != admin.GROUP_UNASSIGNED_NAME]
     return admin.templates.TemplateResponse(
         request,
-        "groups_list.html",
+        "panel/groups_list.html",
         {
             "items": rows,
             "q": q,
@@ -76,7 +76,7 @@ async def groups_new(
     notify_catalog, versions_catalog = await admin._load_catalogs(session)
     return admin.templates.TemplateResponse(
         request,
-        "group_form.html",
+        "panel/group_form.html",
         {
             "title": "Новая группа",
             "g": None,
@@ -224,7 +224,7 @@ async def groups_edit(
     selected_versions = [r.version_key for r in version_rows if r.version_key in version_set]
     return admin.templates.TemplateResponse(
         request,
-        "group_form.html",
+        "panel/group_form.html",
         {
             "title": "Редактирование группы",
             "g": row,

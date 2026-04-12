@@ -156,7 +156,7 @@ select {
   gap: 0.75rem 1.25rem;
 }
 
-/* ---------- Day pills ---------- */
+/* ---------- Day pills (BEM — single source of truth) ---------- */
 .day-pills {
   display: flex;
   flex-wrap: wrap;
@@ -169,13 +169,13 @@ select {
   user-select: none;
 }
 
-.day-pill input {
+.day-pill__input {
   position: absolute;
   opacity: 0;
   pointer-events: none;
 }
 
-.day-pill span {
+.day-pill__text {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -191,24 +191,30 @@ select {
   transition: background 0.15s, border-color 0.15s, transform 0.05s;
 }
 
-.day-pill:hover span {
+.day-pill:hover .day-pill__text {
   border-color: var(--choice-active-border);
   background: rgba(255, 255, 255, 0.09);
 }
 
-.day-pill:active span {
+.day-pill:active .day-pill__text {
   transform: translateY(1px);
 }
 
-.day-pill input:focus-visible + span {
+.day-pill__input:focus-visible + .day-pill__text {
   outline: 2px solid var(--cyan);
   outline-offset: 2px;
 }
 
-.day-pill input:checked + span {
+.day-pill__input:checked + .day-pill__text {
   background: var(--choice-active-bg);
   border-color: var(--choice-active-border);
   color: #fff;
+}
+
+/* Form-pill modifier: wider pills for text labels (notify/version pickers) */
+.day-pill.form-pill .day-pill__text {
+  min-width: auto;
+  padding: 0.4rem 1rem;
 }
 
 /* ---------- Inline time range ---------- */
@@ -312,7 +318,7 @@ input[type="checkbox"] {
     gap: 0.4rem;
   }
 
-  .day-pill span {
+  .day-pill__text {
     min-width: 2.4rem;
     min-height: 2.2rem;
     padding: 0.3rem 0.55rem;
@@ -320,7 +326,7 @@ input[type="checkbox"] {
   }
 }
 
-/* Delete form inline (table rows) */
+/* ---------- Delete form inline (table rows) ---------- */
 .form-inline-delete {
   display: inline;
 }

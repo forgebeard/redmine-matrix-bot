@@ -1,4 +1,4 @@
-<p class="muted service-line"><strong>Статус:</strong> <strong>{{ service_ctx.bot_status_label }}</strong></p>
+<p class="muted service-line"><strong>Статус:</strong> {{ service_ctx.bot_status_label }}</p>
 <p class="muted service-line"><strong>Дата запуска:</strong> {{ service_ctx.started_display }}</p>
 <p class="muted service-line"><strong>Uptime:</strong> {{ service_ctx.uptime_display }}</p>
 <p class="muted service-line">
@@ -6,5 +6,5 @@
   {% if service_ctx.error_count > 0 %}
   <a href="/events" class="service-errors-link">{{ service_ctx.error_count }}</a>
   {% else %}0{% endif %}
-  <span class="muted service-errors-hint"> (последний цикл проверки)</span>
+  <span class="muted service-errors-hint">(последний цикл проверки)</span>
 </p>

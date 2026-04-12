@@ -7,7 +7,7 @@
   <a class="btn btn-primary" href="/groups/new"><i class="fa-solid fa-plus"></i> Добавить группу</a>
 {% endcall %}
 
-<form method="get" action="/groups" class="card form" style="margin-bottom:1rem;">
+<form method="get" action="/groups" class="card form card--mb">
   <div class="filter-row filter-row--grow-search">
     <div class="field">
       <label for="q">Поиск</label>
@@ -40,7 +40,7 @@
         <td>{{ "да" if g.is_active else "нет" }}</td>
         <td class="table-actions">
           <a class="btn btn-ghost" href="/groups/{{ g.id }}/edit">Изменить</a>
-          <form method="post" action="/groups/{{ g.id }}/delete" style="display:inline;" data-inline-delete-form>
+          <form method="post" action="/groups/{{ g.id }}/delete" class="form--inline" data-inline-delete-form>
             <input type="hidden" name="csrf_token" value="{{ request.state._state.get('csrf_token', '') }}"/>
             <button type="submit" class="btn btn-danger">Удалить</button>
           </form>
