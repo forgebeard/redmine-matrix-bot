@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+import pytest
 from security import (
     decrypt_secret,
     encrypt_secret,
@@ -6,7 +9,9 @@ from security import (
     validate_password_policy,
     token_hash,
     make_reset_token,
+    load_master_key,
     _COMMON_WEAK_PASSWORDS,
+    SecurityError,
 )
 
 
@@ -177,4 +182,74 @@ class TestCommonWeakPasswords:
         assert "password" in _COMMON_WEAK_PASSWORDS
         assert "qwerty" in _COMMON_WEAK_PASSWORDS
         assert "admin" in _COMMON_WEAK_PASSWORDS
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# load_master_key
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestLoadMasterKey:
+    """load_master_key: загрузка 32-байтного ключа."""
+
+    def test_from_file(self, tmp_path, monkeypatch):
+        key_file = tmp_path / "master_key"
+        key_file.write_text("0123456789abcdef0123456789abcdef")
+        monkeypatch.setenv("APP_MASTER_KEY_FILE", str(key_file))
+        monkeypatch.delenv("APP_MASTER_KEY", raising=False)
+        result = load_master_key()
+        assert result == b"0123456789abcdef0123456789abcdef"
+        assert len(result) == 32
+
+    def test_from_env_fallback(self, monkeypatch):
+        monkeypatch.setenv("APP_MASTER_KEY_FILE", "/nonexistent/key")
+        monkeypatch.setenv("APP_MASTER_KEY", "0123456789abcdef0123456789abcdef")
+        result = load_master_key()
+        assert result == b"0123456789abcdef0123456789abcdef"
+
+    def test_file_takes_precedence_over_env(self, tmp_path, monkeypatch):
+        key_file = tmp_path / "master_key"
+        key_file.write_text("0123456789abcdef0123456789abcdef")  # 32 chars
+        monkeypatch.setenv("APP_MASTER_KEY_FILE", str(key_file))
+        monkeypatch.setenv("APP_MASTER_KEY", "envkey0000000000000000000000000000")
+        result = load_master_key()
+        assert result == b"0123456789abcdef0123456789abcdef"
+
+    def test_wrong_length_raises_error(self, monkeypatch):
+        monkeypatch.setenv("APP_MASTER_KEY_FILE", "/nonexistent")
+        monkeypatch.setenv("APP_MASTER_KEY", "short")
+        with pytest.raises(SecurityError, match="32 bytes"):
+            load_master_key()
+
+    def test_too_long_raises_error(self, monkeypatch):
+        monkeypatch.setenv("APP_MASTER_KEY_FILE", "/nonexistent")
+        monkeypatch.setenv("APP_MASTER_KEY", "a" * 64)
+        with pytest.raises(SecurityError, match="32 bytes"):
+            load_master_key()
+
+    def test_strips_whitespace_from_file(self, tmp_path, monkeypatch):
+        key_file = tmp_path / "master_key"
+        key_file.write_text("  0123456789abcdef0123456789abcdef  \n")
+        monkeypatch.setenv("APP_MASTER_KEY_FILE", str(key_file))
+        monkeypatch.delenv("APP_MASTER_KEY", raising=False)
+        result = load_master_key()
+        assert len(result) == 32
+
+    def test_strips_whitespace_from_env(self, monkeypatch):
+        monkeypatch.setenv("APP_MASTER_KEY_FILE", "/nonexistent")
+        monkeypatch.setenv("APP_MASTER_KEY", "  0123456789abcdef0123456789abcdef  ")
+        result = load_master_key()
+        assert len(result) == 32
+
+    def test_empty_env_and_file_raises_error(self, monkeypatch):
+        monkeypatch.setenv("APP_MASTER_KEY_FILE", "/nonexistent")
+        monkeypatch.setenv("APP_MASTER_KEY", "")
+        with pytest.raises(SecurityError, match="32 bytes"):
+            load_master_key()
+
+    def test_no_env_raises_error(self, monkeypatch):
+        monkeypatch.setenv("APP_MASTER_KEY_FILE", "/nonexistent")
+        monkeypatch.delenv("APP_MASTER_KEY", raising=False)
+        with pytest.raises(SecurityError, match="32 bytes"):
+            load_master_key()
 

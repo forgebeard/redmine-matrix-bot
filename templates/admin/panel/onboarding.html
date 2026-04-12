@@ -12,13 +12,15 @@
 
     <div class="section-header section-header--action">
       <h2>Параметры сервиса</h2>
-      <div class="service-actions">
-        <button class="btn btn-primary" type="submit">Сохранить</button>
-        <button class="btn btn-ghost" type="button" id="check-access-btn">Проверить доступ</button>
+      <div class="head-line"></div>
+      <div class="section-actions">
+          <button class="btn btn-primary">Сохранить</button>
+          <button class="btn btn-secondary">Проверить доступ</button>
       </div>
     </div>
     <div class="service-bubbles">
       <section class="service-bubble">
+        <div class="card-title">Redmine</div>
         <div class="field">
           <label for="secret_REDMINE_URL">Адрес Redmine</label>
           <input id="secret_REDMINE_URL" name="secret_REDMINE_URL" type="text"
@@ -42,6 +44,7 @@
         </div>
       </section>
       <section class="service-bubble">
+        <div class="card-title">Matrix</div>
         <div class="field">
           <label for="secret_MATRIX_HOMESERVER">Адрес Matrix</label>
           <input id="secret_MATRIX_HOMESERVER" name="secret_MATRIX_HOMESERVER" type="text"
@@ -136,6 +139,7 @@
     <p id="catalog-save-status" class="muted form-status form-status--catalog" aria-live="polite"></p>
     <div class="catalog-grid">
       <section class="service-bubble">
+        <div class="card-title">Уведомления</div>
         <div class="catalog-list" id="notify-list"></div>
         <div class="catalog-add">
           <input id="notify-add-input" type="text" placeholder="Новое уведомление"/>
@@ -143,6 +147,7 @@
         </div>
       </section>
       <section class="service-bubble">
+        <div class="card-title">Версии</div>
         <div class="catalog-list" id="versions-list"></div>
         <div class="catalog-add">
           <input id="versions-add-input" type="text" placeholder="Новая версия"/>
