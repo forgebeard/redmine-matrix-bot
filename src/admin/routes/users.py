@@ -35,7 +35,7 @@ def _admin() -> object:
 async def users_list(
     request: Request,
     q: str = "",
-    group_id: int | None = None,
+    group_id: str = "",
     highlight_user_id: int | None = None,
     session: AsyncSession = Depends(get_session),
 ):
@@ -43,6 +43,9 @@ async def users_list(
     user = getattr(request.state, "current_user", None)
     if not user or getattr(user, "role", "") != "admin":
         raise HTTPException(403, "Только admin")
+
+    # Пустая строка → None (Все группы), иначе int
+    grp: int | None = int(group_id) if group_id.strip() else None
 
     groups_rows = list(
         (await session.execute(select(SupportGroup).order_by(SupportGroup.name.asc())))
@@ -62,11 +65,11 @@ async def users_list(
                 BotUser.room.ilike(like),
             )
         )
-    if group_id is not None:
-        if group_id == -1:
+    if grp is not None:
+        if grp == -1:
             stmt = stmt.where(BotUser.group_id.is_(None))
         else:
-            stmt = stmt.where(BotUser.group_id == group_id)
+            stmt = stmt.where(BotUser.group_id == grp)
     stmt = stmt.order_by(
         BotUser.group_id.asc().nulls_last(),
         BotUser.display_name.asc().nulls_last(),
