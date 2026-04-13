@@ -99,6 +99,7 @@ from admin.routes.redmine import router as redmine_router  # noqa: E402
 from admin.routes.routes_mgmt import router as routes_mgmt_router  # noqa: E402
 from admin.routes.secrets import router as secrets_router  # noqa: E402
 from admin.routes.settings import router as settings_router  # noqa: E402
+from admin.routes.user_import import router as user_import_router  # noqa: E402
 from admin.routes.users import router as users_router  # noqa: E402
 
 app.include_router(health_router)
@@ -114,6 +115,7 @@ app.include_router(app_users_router)
 app.include_router(routes_mgmt_router)
 app.include_router(groups_router)
 app.include_router(users_router)
+app.include_router(user_import_router)
 app.include_router(db_config_router)
 
 # ── Jinja2 globals ───────────────────────────────────────────────────────────

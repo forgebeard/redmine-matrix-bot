@@ -14,6 +14,9 @@
       <h2>Параметры сервиса</h2>
       <div class="head-line"></div>
       <div class="section-actions">
+          <button type="button" id="parse-users-btn" class="btn btn-secondary" disabled title="Сначала заполните Параметры сервиса">
+            <i class="fa-solid fa-users-viewfinder"></i> Парсинг пользователей
+          </button>
           <button type="submit" class="btn btn-primary">Сохранить</button>
           <button type="button" id="check-access-btn" class="btn btn-secondary">Проверить доступ</button>
       </div>
@@ -161,8 +164,68 @@
   </form>
 </div>
 
+<!-- Модалка парсинга пользователей -->
+<div id="parse-modal" class="modal-overlay" style="display:none;">
+  <div class="modal modal--wide">
+    <div class="modal-header">
+      <h3>Парсинг пользователей из Redmine</h3>
+      <button type="button" class="modal-close" id="parse-modal-close">&times;</button>
+    </div>
+    <div class="modal-body">
+      <!-- Шаг 1: ввод URL -->
+      <div id="parse-step-url">
+        <p class="muted">Введите URL страницы группы в Redmine. Бот заберёт список сотрудников и найдёт их в Matrix.</p>
+        <div class="field">
+          <label for="parse-target-url">URL группы Redmine</label>
+          <input id="parse-target-url" type="url" placeholder="https://redmine.company.local/groups/5" required/>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost" id="parse-cancel-1">Отмена</button>
+          <button type="button" class="btn btn-primary" id="parse-start">Начать поиск</button>
+        </div>
+      </div>
+      <!-- Шаг 2: прогресс -->
+      <div id="parse-step-progress" style="display:none;">
+        <p>Поиск может занять до 30 секунд...</p>
+        <div class="progress-bar"><div class="progress-bar-fill" id="parse-progress-fill"></div></div>
+        <p class="muted" id="parse-progress-text">Подключение к Redmine...</p>
+      </div>
+      <!-- Шаг 3: результаты -->
+      <div id="parse-step-results" style="display:none;">
+        <div class="parse-summary" id="parse-summary"></div>
+        <div class="parse-controls">
+          <label class="checkbox-label">
+            <input type="checkbox" id="parse-select-all" checked/>
+            <span>Все пользователи</span>
+          </label>
+          <span class="muted" id="parse-selected-count"></span>
+        </div>
+        <div class="table-wrap table-wrap--modal">
+          <table class="parse-table">
+            <thead>
+              <tr>
+                <th style="width:40px;"><input type="checkbox" id="parse-select-all-header" checked/></th>
+                <th>ФИО</th>
+                <th>Redmine ID</th>
+                <th>Matrix</th>
+                <th>Статус</th>
+              </tr>
+            </thead>
+            <tbody id="parse-results-body"></tbody>
+          </table>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost" id="parse-cancel-3">Отмена</button>
+          <button type="button" class="btn btn-primary" id="parse-create">Создать выбранных</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script src="/static/admin/js/toast.js?v={{ asset_version() }}"></script>
 <script src="/static/admin/js/toggle_visibility.js?v={{ asset_version() }}"></script>
 <script src="/static/admin/js/catalog_editor.js?v={{ asset_version() }}"></script>
 <script src="/static/admin/js/onboarding.js?v={{ asset_version() }}"></script>
+<script src="/static/admin/js/user_parse.js?v={{ asset_version() }}"></script>
 {% endblock %}
