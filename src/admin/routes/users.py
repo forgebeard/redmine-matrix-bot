@@ -11,6 +11,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from sqlalchemy import or_, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.models import BotHeartbeat, BotUser, SupportGroup, UserVersionRoute
@@ -215,7 +216,12 @@ async def users_create(
         dnd=dnd in ("on", "true", "1"),
     )
     session.add(row)
-    await session.flush()
+    try:
+        await session.flush()
+    except IntegrityError:
+        raise HTTPException(
+            400, "Не удалось создать пользователя: проверьте уникальность redmine_id"
+        )
     if version_preset == "all":
         version_keys = list(versions_catalog)
     elif version_preset == "custom":
