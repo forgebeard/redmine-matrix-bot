@@ -182,6 +182,8 @@ _last_check_time: dict[int, datetime] = {}
 
 logger = logging.getLogger("redmine_bot")
 logger.setLevel(logging.INFO)
+logging.getLogger("nio.responses").setLevel(logging.CRITICAL)
+logging.getLogger("nio.crypto").setLevel(logging.WARNING)
 
 setup_json_logging("redmine_bot")
 
@@ -304,6 +306,7 @@ async def main() -> None:
                 REDMINE_URL = config["REDMINE_URL"]
                 REDMINE_KEY = config["REDMINE_API_KEY"]
                 logger.info("✅ Конфиг загружен из БД")
+                logger.info("🔑 [TEMP] REDMINE_URL = '%s'", config["REDMINE_URL"])
                 break
             else:
                 logger.warning(
@@ -378,6 +381,33 @@ async def main() -> None:
     client.user_id = MATRIX_USER_ID
     logger.info("✅ Matrix: клиент создан для %s", MATRIX_USER_ID)
 
+    # ── Первичная синхронизация Matrix (нужна для поиска DM-комнат) ──
+    logger.info("📡 Matrix: первичная синхронизация...")
+    try:
+        sync_resp = await client.sync(timeout=30000, full_state=True)
+        logger.info(
+            "✅ Matrix sync: %d комнат загружено",
+            len(client.rooms),
+        )
+    except Exception as e:
+        logger.warning("⚠ Matrix sync не удался (DM-резолв может не работать): %s", e)
+
+        # ── Pre-warm DM-комнат ──────────────────────────────────────────────────
+    from bot.sender import prewarm_dm_rooms
+
+    all_mxids = []
+    for u_cfg in USERS:
+        room = (u_cfg.get("room") or "").strip()
+        if room:
+            all_mxids.append(room)
+        # group_room тоже может быть MXID
+        gr = (u_cfg.get("group_room") or "").strip()
+        if gr:
+            all_mxids.append(gr)
+
+    if all_mxids:
+        await prewarm_dm_rooms(client, all_mxids)
+
     # ── Подключение к Redmine ──
     redmine = Redmine(REDMINE_URL, key=REDMINE_KEY)
     try:
@@ -435,10 +465,12 @@ async def main() -> None:
             "redmine_client_for_user": _redmine_client_for_user,
             "check_user_issues_fn": check_user_issues,
             "last_check_time": _last_check_time,
+            "max_concurrent": 5,
         },
         max_instances=1,
         coalesce=True,
         misfire_grace_time=30,
+        next_run_time=datetime.now(tz=BOT_TZ),
     )
 
     scheduler.add_job(

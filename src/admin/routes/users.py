@@ -125,10 +125,14 @@ async def users_new(
         .all()
     )
     statuses_catalog = await admin._load_statuses_catalog(session)
-    _nc, versions_catalog = await admin._load_catalogs(session)
+    versions_catalog = await admin._load_versions_catalog(session)
+    priorities_catalog = await admin._load_priorities_catalog(session)
+    _nc, _old_versions = await admin._load_catalogs(session)
     matrix_domain = await admin._get_matrix_domain_from_db(session)
     # По умолчанию — только статусы с is_default=True
     status_default_keys = [item["key"] for item in statuses_catalog if item.get("is_default")]
+    version_default_keys = [item["key"] for item in versions_catalog if item.get("is_default")]
+    priority_default_keys = [item["key"] for item in priorities_catalog if item.get("is_default")]
     return admin.templates.TemplateResponse(
         request,
         "panel/user_form.html",
@@ -140,6 +144,12 @@ async def users_new(
             "status_json": json.dumps(status_default_keys, ensure_ascii=False),
             "status_preset": "default",
             "status_selected": status_default_keys,
+            "version_json": json.dumps(version_default_keys, ensure_ascii=False),
+            "version_preset": "default",
+            "version_selected": version_default_keys,
+            "priority_json": json.dumps(priority_default_keys, ensure_ascii=False),
+            "priority_preset": "default",
+            "priority_selected": priority_default_keys,
             "groups": admin._groups_assignable(groups_rows),
             "group_unassigned_display": admin.GROUP_UNASSIGNED_DISPLAY,
             "bot_tz": admin.os.getenv("BOT_TIMEZONE", "Europe/Moscow"),
@@ -148,8 +158,7 @@ async def users_new(
             "timezone_labels": admin._timezone_labels(admin._standard_timezone_options()),
             "statuses_catalog": statuses_catalog,
             "versions_catalog": versions_catalog,
-            "selected_version_keys": [],
-            "version_preset": "all",
+            "priorities_catalog": priorities_catalog,
         },
     )
 
@@ -162,12 +171,14 @@ async def users_create(
     display_name: Annotated[str, Form()] = "",
     group_id: Annotated[str, Form()] = "",
     status_json: Annotated[str, Form()] = "",
-    status_preset: Annotated[str, Form()] = "all",
+    status_preset: Annotated[str, Form()] = "default",
     status_values: Annotated[list[str], Form()] = [],
-    initial_version_keys: Annotated[str, Form()] = "",
-    version_keys_json: Annotated[str, Form()] = "",
-    version_preset: Annotated[str, Form()] = "all",
+    version_json: Annotated[str, Form()] = "",
+    version_preset: Annotated[str, Form()] = "default",
     version_values: Annotated[list[str], Form()] = [],
+    priority_json: Annotated[str, Form()] = "",
+    priority_preset: Annotated[str, Form()] = "default",
+    priority_values: Annotated[list[str], Form()] = [],
     timezone_name: Annotated[str, Form()] = "",
     work_hours: Annotated[str, Form()] = "",
     work_hours_from: Annotated[str, Form()] = "",
@@ -180,7 +191,8 @@ async def users_create(
 ):
     admin = _admin()
     statuses_catalog = await admin._load_statuses_catalog(session)
-    _nc, versions_catalog = await admin._load_catalogs(session)
+    versions_catalog = await admin._load_versions_catalog(session)
+    priorities_catalog = await admin._load_priorities_catalog(session)
     status_allowed = [item["key"] for item in statuses_catalog]
     admin._verify_csrf(request, csrf_token)
     user = getattr(request.state, "current_user", None)
@@ -196,16 +208,32 @@ async def users_create(
         wd = sorted({int(v) for v in work_days_values if str(v).isdigit()})
     else:
         wd = admin._parse_work_days(work_days_json)
-    if status_preset == "all":
-        notify = ["all"]
-    elif status_preset == "new_only":
-        notify = ["new"]
-    elif status_preset == "overdue_only":
-        notify = ["overdue"]
+
+    # Статусы
+    if status_preset == "default":
+        notify = [item["key"] for item in statuses_catalog if item.get("is_default")]
     elif status_preset == "custom":
         notify = admin._normalize_notify(status_values, status_allowed)
     else:
         notify = admin._parse_notify(status_json)
+
+    # Версии
+    version_catalog_keys = [item["key"] for item in versions_catalog]
+    if version_preset == "default":
+        versions = [item["key"] for item in versions_catalog if item.get("is_default")]
+    elif version_preset == "custom":
+        versions = admin._normalize_versions(version_values, version_catalog_keys)
+    else:
+        versions = admin._parse_json_string_list(version_json) or ["all"]
+
+    # Приоритеты
+    priority_catalog_keys = [item["key"] for item in priorities_catalog]
+    if priority_preset == "default":
+        priorities = [item["key"] for item in priorities_catalog if item.get("is_default")]
+    elif priority_preset == "custom":
+        priorities = admin._normalize_versions(priority_values, priority_catalog_keys)
+    else:
+        priorities = admin._parse_json_string_list(priority_json) or ["all"]
     full_room = await admin._build_room_id_async(room.strip(), session)
     row = BotUser(
         redmine_id=redmine_id,
@@ -214,6 +242,8 @@ async def users_create(
         department=None,
         room=full_room,
         notify=notify,
+        versions=versions,
+        priorities=priorities,
         timezone=(timezone_name or "").strip() or None,
         work_hours=wh,
         work_days=wd,
@@ -524,8 +554,10 @@ async def users_edit(
         .all()
     )
     statuses_catalog = await admin._load_statuses_catalog(session)
-    _nc, versions_catalog = await admin._load_catalogs(session)
+    versions_catalog = await admin._load_versions_catalog(session)
+    priorities_catalog = await admin._load_priorities_catalog(session)
     matrix_domain = await admin._get_matrix_domain_from_db(session)
+
     status_keys = {item["key"] for item in statuses_catalog}
     status_default_keys = [item["key"] for item in statuses_catalog if item.get("is_default")]
     notify_selected = [str(x).strip() for x in (row.notify or ["all"]) if str(x).strip()]
@@ -534,8 +566,21 @@ async def users_edit(
         status_selected = status_default_keys
     else:
         status_selected = [k for k in notify_selected if k in status_keys]
-    version_set = set(versions_catalog)
-    selected_versions = [r.version_key for r in version_rows if r.version_key in version_set]
+
+    # Версии (из БД, пока legacy)
+    version_default_keys = [item["key"] for item in versions_catalog if item.get("is_default")]
+    version_selected = row.versions or []
+    version_preset = "default" if (not version_selected or version_selected == ["all"]) else "custom"
+    if version_preset == "default":
+        version_selected = version_default_keys
+
+    # Приоритеты
+    priority_default_keys = [item["key"] for item in priorities_catalog if item.get("is_default")]
+    priority_selected = row.priorities or []
+    priority_preset = "default" if (not priority_selected or priority_selected == ["all"]) else "custom"
+    if priority_preset == "default":
+        priority_selected = priority_default_keys
+
     return admin.templates.TemplateResponse(
         request,
         "panel/user_form.html",
@@ -544,23 +589,28 @@ async def users_edit(
             "u": row,
             "room_localpart": admin._room_localpart(row.room),
             "matrix_domain": matrix_domain,
+            # Statuses
             "status_json": json.dumps(row.notify, ensure_ascii=False),
             "status_preset": preset,
             "status_selected": status_selected,
+            # Versions
+            "version_json": json.dumps(row.versions, ensure_ascii=False),
+            "version_preset": version_preset,
+            "version_selected": version_selected,
+            # Priorities
+            "priority_json": json.dumps(row.priorities, ensure_ascii=False),
+            "priority_preset": priority_preset,
+            "priority_selected": priority_selected,
+            # Catalogs
+            "statuses_catalog": statuses_catalog,
+            "versions_catalog": versions_catalog,
+            "priorities_catalog": priorities_catalog,
             "groups": admin._groups_assignable(groups_rows),
             "group_unassigned_display": admin.GROUP_UNASSIGNED_DISPLAY,
             "bot_tz": admin.os.getenv("BOT_TIMEZONE", "Europe/Moscow"),
             "timezone_top_options": admin._top_timezone_options(),
             "timezone_all_options": admin._standard_timezone_options(),
             "timezone_labels": admin._timezone_labels(admin._standard_timezone_options()),
-            "version_routes": version_rows,
-            "version_keys_text": "\n".join(r.version_key for r in version_rows),
-            "version_err": version_err,
-            "version_msg": version_msg,
-            "statuses_catalog": statuses_catalog,
-            "versions_catalog": versions_catalog,
-            "selected_version_keys": selected_versions,
-            "version_preset": admin._version_preset(selected_versions, versions_catalog),
         },
     )
 
@@ -576,10 +626,12 @@ async def users_update(
     status_json: Annotated[str, Form()] = "",
     status_preset: Annotated[str, Form()] = "all",
     status_values: Annotated[list[str], Form()] = [],
-    version_preset: Annotated[str, Form()] = "all",
+    version_preset: Annotated[str, Form()] = "default",
     version_values: Annotated[list[str], Form()] = [],
-    version_keys_text: Annotated[str, Form()] = "",
-    version_keys_json: Annotated[str, Form()] = "",
+    version_json: Annotated[str, Form()] = "",
+    priority_preset: Annotated[str, Form()] = "default",
+    priority_values: Annotated[list[str], Form()] = [],
+    priority_json: Annotated[str, Form()] = "",
     timezone_name: Annotated[str, Form()] = "",
     work_hours: Annotated[str, Form()] = "",
     work_hours_from: Annotated[str, Form()] = "",
@@ -592,7 +644,8 @@ async def users_update(
 ):
     admin = _admin()
     statuses_catalog = await admin._load_statuses_catalog(session)
-    _nc, versions_catalog = await admin._load_catalogs(session)
+    versions_catalog = await admin._load_versions_catalog(session)
+    priorities_catalog = await admin._load_priorities_catalog(session)
     status_allowed = [item["key"] for item in statuses_catalog]
     admin._verify_csrf(request, csrf_token)
     user = getattr(request.state, "current_user", None)
@@ -608,16 +661,14 @@ async def users_update(
     row.group_id = int(group_id) if str(group_id).isdigit() else None
     row.room = new_room
     row.timezone = (timezone_name or "").strip() or None
-    if status_preset == "all":
-        row.notify = ["all"]
-    elif status_preset == "new_only":
-        row.notify = ["new"]
-    elif status_preset == "overdue_only":
-        row.notify = ["overdue"]
+    # Статусы
+    if status_preset == "default":
+        row.notify = [item["key"] for item in statuses_catalog if item.get("is_default")]
     elif status_preset == "custom":
         row.notify = admin._normalize_notify(status_values, status_allowed)
     else:
         row.notify = admin._parse_notify(status_json)
+
     if work_hours_from and work_hours_to:
         wh_from = _validate_work_time(work_hours_from, "Время начала")
         wh_to = _validate_work_time(work_hours_to, "Время окончания")
@@ -629,40 +680,25 @@ async def users_update(
     else:
         row.work_days = admin._parse_work_days(work_days_json)
     row.dnd = dnd in ("on", "true", "1")
-    if version_preset == "all":
-        submitted_versions = list(versions_catalog)
+
+    # Версии
+    version_catalog_keys = [item["key"] for item in versions_catalog]
+    if version_preset == "default":
+        row.versions = [item["key"] for item in versions_catalog if item.get("is_default")]
     elif version_preset == "custom":
-        submitted_versions = admin._normalize_versions(version_values, versions_catalog)
+        row.versions = admin._normalize_versions(version_values, version_catalog_keys)
     else:
-        submitted_versions = admin._parse_json_string_list(
-            version_keys_json
-        ) or admin._parse_status_keys_list(version_keys_text)
-    existing_routes = list(
-        (
-            await session.execute(
-                select(UserVersionRoute).where(UserVersionRoute.bot_user_id == user_id)
-            )
-        )
-        .scalars()
-        .all()
-    )
-    existing_by_key = {r.version_key: r for r in existing_routes}
-    submitted_set = set(submitted_versions)
-    for r in existing_routes:
-        if r.version_key not in submitted_set:
-            await session.delete(r)
-    for key in submitted_versions:
-        ex = existing_by_key.get(key)
-        if ex:
-            ex.room_id = new_room
-            continue
-        session.add(UserVersionRoute(bot_user_id=user_id, version_key=key, room_id=new_room))
-    if old_room and new_room and old_room != new_room:
-        await session.execute(
-            update(UserVersionRoute)
-            .where(UserVersionRoute.bot_user_id == user_id, UserVersionRoute.room_id == old_room)
-            .values(room_id=new_room)
-        )
+        row.versions = admin._parse_json_string_list(version_json) or ["all"]
+
+    # Приоритеты
+    priority_catalog_keys = [item["key"] for item in priorities_catalog]
+    if priority_preset == "default":
+        row.priorities = [item["key"] for item in priorities_catalog if item.get("is_default")]
+    elif priority_preset == "custom":
+        row.priorities = admin._normalize_versions(priority_values, priority_catalog_keys)
+    else:
+        row.priorities = admin._parse_json_string_list(priority_json) or ["all"]
+
     await admin._maybe_log_admin_crud(
         session,
         user,

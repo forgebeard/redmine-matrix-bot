@@ -61,38 +61,81 @@
 
   /* --- Version preset toggle --- */
   var versionRadios = Array.from(document.querySelectorAll('input[name="version_preset"]'));
-  var versionBox = document.getElementById('group_versions_custom_box');
-  var versionChoices = Array.from(document.querySelectorAll('input[name="version_values"]'));
-  var hiddenVersionJson = document.getElementById('group_version_keys_json');
-  var hiddenInitialKeys = document.getElementById('initial_version_keys');
+  var versionBox = document.getElementById('versions_custom_box_group');
+  var versionCheckboxes = Array.from(document.querySelectorAll('input[name="version_values"]'));
 
-  function refreshVersionBox() {
-    var current = versionRadios.find(function (r) { return r.checked; });
-    if (!versionBox) return;
-    versionBox.style.display = current && current.value === 'custom' ? 'block' : 'none';
+  function setVersionPreset(val) {
+    var target = versionRadios.find(function (r) { return r.value === val; });
+    if (!target || target.checked) return;
+    target.checked = true;
+    var evt = new Event('change', { bubbles: true });
+    target.dispatchEvent(evt);
   }
 
   function syncVersions() {
     var current = versionRadios.find(function (r) { return r.checked; });
-    var values = [];
-    if (current && current.value === 'default') {
-      values = versionChoices.map(function (c) { return c.value.trim(); }).filter(Boolean);
+    if (!current) return;
+    if (current.value === 'default') {
+      versionCheckboxes.forEach(function (cb) { cb.checked = cb.getAttribute('data-default') === 'true'; });
     } else {
-      values = versionChoices.filter(function (c) { return c.checked; }).map(function (c) { return c.value.trim(); }).filter(Boolean);
+      versionCheckboxes.forEach(function (cb) { cb.checked = false; });
     }
-    if (hiddenVersionJson) hiddenVersionJson.value = JSON.stringify(values);
-    if (hiddenInitialKeys) hiddenInitialKeys.value = values.join(', ');
     refreshSummary();
   }
 
-  versionRadios.forEach(function (radio) {
-    radio.addEventListener('change', function () { refreshVersionBox(); syncVersions(); });
-  });
-  versionChoices.forEach(function (choice) {
-    choice.addEventListener('change', syncVersions);
-  });
-  refreshVersionBox();
+  function onVersionCheckboxChange() {
+    var current = versionRadios.find(function (r) { return r.checked; });
+    if (!current) return;
+    var defaultChecked = versionCheckboxes.filter(function (cb) { return cb.getAttribute('data-default') === 'true'; }).every(function (cb) { return cb.checked; });
+    var nonDefaultChecked = versionCheckboxes.filter(function (cb) { return cb.getAttribute('data-default') !== 'true'; }).every(function (cb) { return !cb.checked; });
+
+    if (current.value === 'default' && !defaultChecked) setVersionPreset('custom');
+    else if (current.value === 'custom' && defaultChecked && nonDefaultChecked) setVersionPreset('default');
+    refreshSummary();
+  }
+
+  versionRadios.forEach(function (r) { r.addEventListener('change', syncVersions); });
+  versionCheckboxes.forEach(function (cb) { cb.addEventListener('change', onVersionCheckboxChange); });
   syncVersions();
+
+  /* --- Priority preset toggle --- */
+  var priorityRadios = Array.from(document.querySelectorAll('input[name="priority_preset"]'));
+  var priorityBox = document.getElementById('priorities_custom_box_group');
+  var priorityCheckboxes = Array.from(document.querySelectorAll('input[name="priority_values"]'));
+
+  function setPriorityPreset(val) {
+    var target = priorityRadios.find(function (r) { return r.value === val; });
+    if (!target || target.checked) return;
+    target.checked = true;
+    var evt = new Event('change', { bubbles: true });
+    target.dispatchEvent(evt);
+  }
+
+  function syncPriorities() {
+    var current = priorityRadios.find(function (r) { return r.checked; });
+    if (!current) return;
+    if (current.value === 'default') {
+      priorityCheckboxes.forEach(function (cb) { cb.checked = cb.getAttribute('data-default') === 'true'; });
+    } else {
+      priorityCheckboxes.forEach(function (cb) { cb.checked = false; });
+    }
+    refreshSummary();
+  }
+
+  function onPriorityCheckboxChange() {
+    var current = priorityRadios.find(function (r) { return r.checked; });
+    if (!current) return;
+    var defaultChecked = priorityCheckboxes.filter(function (cb) { return cb.getAttribute('data-default') === 'true'; }).every(function (cb) { return cb.checked; });
+    var nonDefaultChecked = priorityCheckboxes.filter(function (cb) { return cb.getAttribute('data-default') !== 'true'; }).every(function (cb) { return !cb.checked; });
+
+    if (current.value === 'default' && !defaultChecked) setPriorityPreset('custom');
+    else if (current.value === 'custom' && defaultChecked && nonDefaultChecked) setPriorityPreset('default');
+    refreshSummary();
+  }
+
+  priorityRadios.forEach(function (r) { r.addEventListener('change', syncPriorities); });
+  priorityCheckboxes.forEach(function (cb) { cb.addEventListener('change', onPriorityCheckboxChange); });
+  syncPriorities();
 
   /* --- Summary helpers --- */
   function textOrDash(v) {
@@ -116,6 +159,18 @@
     if (!active) return '—';
     if (active.value === 'default') return 'Все версии';
     var labels = Array.from(document.querySelectorAll('input[name="version_values"]'))
+      .filter(function (el) { return el.checked; })
+      .map(function (el) { return String(el.parentElement && el.parentElement.textContent || '').trim(); })
+      .filter(Boolean);
+    return labels.length ? labels.join(', ') : '—';
+  }
+
+  // ★ ДОБАВЛЕНО: функция для отображения приоритетов в summary
+  function selectedPrioritiesLabel() {
+    var active = document.querySelector('input[name="priority_preset"]:checked');
+    if (!active) return '—';
+    if (active.value === 'default') return 'По умолчанию';
+    var labels = Array.from(document.querySelectorAll('input[name="priority_values"]'))
       .filter(function (el) { return el.checked; })
       .map(function (el) { return String(el.parentElement && el.parentElement.textContent || '').trim(); })
       .filter(Boolean);
@@ -156,6 +211,8 @@
     setSummary('summary_group_tz', textOrDash(tzEl ? tzEl.value : fallbackTz));
     setSummary('summary_group_notify', selectedNotifyLabel());
     setSummary('summary_group_versions', selectedVersionsLabel());
+    // ★ ДОБАВЛЕНО: приоритеты в summary
+    setSummary('summary_group_priorities', selectedPrioritiesLabel());
     setSummary('summary_group_hours', selectedHours());
     setSummary('summary_group_dnd', dndLabel());
   }
@@ -169,7 +226,8 @@
     if (evt !== 'change') el.addEventListener('change', refreshSummary);
   });
 
-  Array.from(document.querySelectorAll('input[name="status_preset"], input[name="status_values"], input[name="version_values"], input[name="version_preset"]')).forEach(function (el) {
+  // ★ ДОБАВЛЕНО: priority_values и priority_preset в список слушателей
+  Array.from(document.querySelectorAll('input[name="status_preset"], input[name="status_values"], input[name="version_values"], input[name="version_preset"], input[name="priority_values"], input[name="priority_preset"]')).forEach(function (el) {
     el.addEventListener('change', refreshSummary);
   });
 
@@ -259,7 +317,7 @@
   var TIME_RE = /^[0-2]\d:[0-5]\d$/;
 
   function validateTime(val) {
-    if (!val || val.length < 4) return true; // incomplete — don't error yet
+    if (!val || val.length < 4) return true;
     if (!TIME_RE.test(val)) return false;
     var h = parseInt(val.substring(0, 2), 10);
     return h >= 0 && h <= 23;

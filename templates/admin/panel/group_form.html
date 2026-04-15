@@ -50,28 +50,51 @@
             </div>
             <input type="hidden" name="status_json" value="{{ status_json }}"/>
           </div>
-          <h3 class="section-subtitle">Версии</h3>
+
+          <h2 class="section-title">Версии</h2>
           <div class="day-pills" role="group" aria-label="Режим версий">
             <label class="day-pill form-pill">
-              <input type="radio" class="day-pill__input" name="version_preset" value="all" {% if version_preset == "all" %}checked{% endif %}/>
-              <span class="day-pill__text">Все версии</span>
+              <input type="radio" class="day-pill__input" name="version_preset" value="default" {% if version_preset == "default" %}checked{% endif %}/>
+              <span class="day-pill__text">По умолчанию</span>
             </label>
             <label class="day-pill form-pill">
               <input type="radio" class="day-pill__input" name="version_preset" value="custom" {% if version_preset == "custom" %}checked{% endif %}/>
               <span class="day-pill__text">Выбрать версии</span>
             </label>
           </div>
-          <div id="group_versions_custom_box" class="sub-panel">
+          <div id="versions_custom_box_group" class="sub-panel">
             <div class="day-pills" role="group" aria-label="Выбор версий">
-              {% for version_name in versions_catalog %}
+              {% for item in versions_catalog %}
               <label class="day-pill form-pill">
-                <input type="checkbox" class="day-pill__input group-version-choice" name="version_values" value="{{ version_name }}" {% if selected_version_keys and version_name in selected_version_keys %}checked{% endif %}/>
-                <span class="day-pill__text">{{ version_name }}</span>
+                <input type="checkbox" class="day-pill__input" name="version_values" value="{{ item.key }}" data-default="{{ 'true' if item.is_default else 'false' }}" {% if item.key in version_selected %}checked{% endif %}/>
+                <span class="day-pill__text">{{ item.label }}</span>
               </label>
               {% endfor %}
             </div>
-            <input type="hidden" id="group_version_keys_json" name="version_keys_json" value='{{ selected_version_keys|default([])|tojson }}'/>
-            <input type="hidden" id="initial_version_keys" name="initial_version_keys" value=""/>
+            <input type="hidden" name="version_json" value="{{ version_json }}"/>
+          </div>
+
+          <h2 class="section-title">Приоритеты</h2>
+          <div class="day-pills" role="group" aria-label="Режим приоритетов">
+            <label class="day-pill form-pill">
+              <input type="radio" class="day-pill__input" name="priority_preset" value="default" {% if priority_preset == "default" %}checked{% endif %}/>
+              <span class="day-pill__text">По умолчанию</span>
+            </label>
+            <label class="day-pill form-pill">
+              <input type="radio" class="day-pill__input" name="priority_preset" value="custom" {% if priority_preset == "custom" %}checked{% endif %}/>
+              <span class="day-pill__text">Выбрать приоритеты</span>
+            </label>
+          </div>
+          <div id="priorities_custom_box_group" class="sub-panel">
+            <div class="day-pills" role="group" aria-label="Выбор приоритетов">
+              {% for item in priorities_catalog %}
+              <label class="day-pill form-pill">
+                <input type="checkbox" class="day-pill__input" name="priority_values" value="{{ item.key }}" data-default="{{ 'true' if item.is_default else 'false' }}" {% if item.key in priority_selected %}checked{% endif %}/>
+                <span class="day-pill__text">{{ item.label }}</span>
+              </label>
+              {% endfor %}
+            </div>
+            <input type="hidden" name="priority_json" value="{{ priority_json }}"/>
           </div>
         </article>
 
@@ -135,6 +158,7 @@
           <div class="summary-line"><span class="k">Таймзона</span><span class="v" id="summary_group_tz">—</span></div>
           <div class="summary-line"><span class="k">Статусы</span><span class="v" id="summary_group_notify">—</span></div>
           <div class="summary-line"><span class="k">Версии</span><span class="v" id="summary_group_versions">—</span></div>
+          <div class="summary-line"><span class="k">Приоритеты</span><span class="v" id="summary_group_priorities">—</span></div>
           <div class="summary-line"><span class="k">Часы</span><span class="v" id="summary_group_hours">—</span></div>
           <div class="summary-line"><span class="k">Отключить уведомления группы</span><span class="v" id="summary_group_dnd">—</span></div>
           <div class="page-actions page-actions--mt">

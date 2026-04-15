@@ -15,10 +15,11 @@
   var progressText = document.getElementById('parse-progress-text');
   var summaryDiv = document.getElementById('parse-summary');
   var selectAllCb = document.getElementById('parse-select-all');
-  var selectAllHeader = document.getElementById('parse-select-all-header');
   var selectedCount = document.getElementById('parse-selected-count');
-  var resultsBody = document.getElementById('parse-results-body');
-  var parseReadyStatus = document.getElementById('parse-ready-status');
+  
+  // New Grid Containers
+  var gridNew = document.getElementById('parse-grid-new');
+  var gridExisting = document.getElementById('parse-grid-existing');
 
   var csrfToken = '';
   var lastScanData = null;
@@ -38,13 +39,7 @@
       var r = await fetch('/api/users/scan-redmine/check');
       var data = await r.json();
       if (data.ready) {
-        if (parseReadyStatus) {
-          parseReadyStatus.textContent = '✅ Все параметры заполнены — можно начинать';
-        }
-      } else {
-        if (parseReadyStatus) {
-          parseReadyStatus.textContent = '⚠️ Заполните Параметры сервиса (Redmine + Matrix)';
-        }
+        // Status message removed or handled via UI logic
       }
     } catch (e) { /* ignore */ }
   }
@@ -61,6 +56,8 @@
     showStep('url');
     targetUrlInput.value = '';
     lastScanData = null;
+    gridNew.innerHTML = '';
+    gridExisting.innerHTML = '';
   }
 
   // ── Scan ────────────────────────────────────────────────────
@@ -72,8 +69,6 @@
       return;
     }
 
-    console.log('[parse] Starting scan for:', url);
-
     showStep('progress');
     progressFill.style.width = '10%';
     progressText.textContent = 'Загрузка пользователей из Redmine...';
@@ -83,9 +78,7 @@
     formData.append('csrf_token', getCsrfToken());
 
     try {
-      console.log('[parse] Sending fetch request...');
       var controller = new AbortController();
-      // Без таймаута — сервер сам контролирует время
 
       var r = await fetch('/api/users/scan-redmine', {
         method: 'POST',
@@ -93,10 +86,7 @@
         signal: controller.signal,
       });
 
-      console.log('[parse] Got response:', r.status);
-
       var data = await r.json();
-      console.log('[parse] Response data:', data);
 
       if (!r.ok) {
         progressFill.style.width = '0%';
@@ -137,41 +127,75 @@
 
   function renderResults(data) {
     var matches = data.matches || [];
+    
     summaryDiv.innerHTML =
       '<span class="found">✅ Найдено: ' + data.found + '</span>' +
       '<span class="existing">ℹ️ Уже в системе: ' + data.existing + '</span>' +
       '<span class="not-found">❌ Не найдено: ' + data.not_found + '</span>';
 
-    resultsBody.innerHTML = '';
-    matches.forEach(function (m, i) {
-      var tr = document.createElement('tr');
+    gridNew.innerHTML = '';
+    gridExisting.innerHTML = '';
 
-      var statusText, statusClass;
-      if (m.status === 'found') {
-        statusText = '✅ Найден';
-        statusClass = 'status-found';
-      } else if (m.status === 'existing') {
-        statusText = 'ℹ️ Уже в системе';
-        statusClass = 'status-existing';
-      } else {
-        statusText = '❌ Не найден';
-        statusClass = 'status-not-found';
-      }
+    // Split users
+    var newUsers = matches.filter(function (m) { return m.status === 'found'; });
+    var existingUsers = matches.filter(function (m) { return m.status === 'existing'; });
+    // Not found users are hidden or shown differently, but for now let's focus on found/existing
+    // If needed, we can add a "not found" section, but the requirement was to split new vs existing.
+    // Let's render only found and existing for now to keep it clean, or maybe not found too?
+    // The prompt asked to split "New" vs "Already in system". "Not found" is a separate category.
+    // I will add not found to "New" section but marked as error, or just skip them?
+    // Usually, you only want to create found ones. Let's render found and existing.
+    // Actually, the user sees "Not found" count. Let's keep it simple: just render found and existing.
 
-      var cbChecked = 'checked';
-      var cbDisabled = '';
+    // Render New Users
+    if (newUsers.length > 0) {
+      renderGridSection(gridNew, newUsers, true);
+    } else {
+      gridNew.innerHTML = '<p class="muted" style="grid-column: 1/-1; text-align:center;">Нет новых пользователей для создания.</p>';
+    }
 
-      tr.innerHTML =
-        '<td><input type="checkbox" class="parse-cb" data-idx="' + i + '" ' + cbChecked + ' ' + cbDisabled + '/></td>' +
-        '<td>' + escHtml(m.redmine_name) + '</td>' +
-        '<td>' + m.redmine_id + '</td>' +
-        '<td>' + escHtml(m.matrix_localpart || '—') + '</td>' +
-        '<td class="' + statusClass + '">' + statusText + '</td>';
-
-      resultsBody.appendChild(tr);
-    });
+    // Render Existing Users
+    if (existingUsers.length > 0) {
+      renderGridSection(gridExisting, existingUsers, false);
+    } else {
+      // Optional: hide section if empty? Or show message.
+      gridExisting.innerHTML = '<p class="muted" style="grid-column: 1/-1; text-align:center;">Нет пользователей в системе.</p>';
+    }
 
     updateSelectedCount();
+    
+    // Bind select all
+    if (selectAllCb) {
+      selectAllCb.checked = true; // Default check all new
+    }
+  }
+
+  function renderGridSection(container, users, isNew) {
+    for (var i = 0; i < users.length; i++) {
+      var m = users[i];
+      var div = document.createElement('div');
+      div.className = 'parse-card' + (isNew ? '' : ' existing');
+      
+      var matrixHtml = m.matrix_localpart 
+        ? '<span class="card-matrix">@' + m.matrix_localpart + '</span>' 
+        : '<span class="card-matrix not-found">Не найден</span>';
+
+      var content = '';
+      if (isNew) {
+        content = '<input type="checkbox" class="card-cb" data-idx="' + m.redmine_id + '" checked/>';
+      }
+      
+      div.innerHTML = content +
+        '<div class="card-info">' +
+          '<div class="card-name" title="' + escHtml(m.redmine_name) + '">' + escHtml(m.redmine_name) + '</div>' +
+          '<div class="card-meta">' +
+            '<span class="card-id">ID: ' + m.redmine_id + '</span>' +
+            matrixHtml +
+          '</div>' +
+        '</div>';
+
+      container.appendChild(div);
+    }
   }
 
   function escHtml(s) {
@@ -181,8 +205,8 @@
   }
 
   function updateSelectedCount() {
-    var total = resultsBody.querySelectorAll('.parse-cb:not([disabled])').length;
-    var checked = resultsBody.querySelectorAll('.parse-cb:checked:not([disabled])').length;
+    var total = gridNew.querySelectorAll('.card-cb').length;
+    var checked = gridNew.querySelectorAll('.card-cb:checked').length;
     selectedCount.textContent = 'Выбрано: ' + checked + ' из ' + total;
   }
 
@@ -190,35 +214,26 @@
 
   async function bulkCreate() {
     console.log('[parse] bulkCreate called');
-    console.log('[parse] lastScanData:', lastScanData);
-
-    if (!lastScanData || !lastScanData.matches) {
-      console.error('[parse] No scan data available!');
-      if (typeof toast !== 'undefined') {
-        toast.error('Нет данных для создания. Сначала выполните сканирование.');
-      }
-      return;
-    }
 
     var selected = [];
-    resultsBody.querySelectorAll('.parse-cb:checked').forEach(function (cb) {
-      var idx = parseInt(cb.getAttribute('data-idx'), 10);
-      console.log('[parse] Checkbox checked: idx=' + idx);
-      if (lastScanData && lastScanData.matches[idx]) {
-        var m = lastScanData.matches[idx];
-        console.log('[parse] Adding user:', m.redmine_name, m.matrix_localpart, m.status);
-        selected.push({
-          redmine_id: m.redmine_id,
-          redmine_name: m.redmine_name,
-          matrix_localpart: m.matrix_localpart || '',
-        });
+    gridNew.querySelectorAll('.card-cb:checked').forEach(function (cb) {
+      var rid = cb.getAttribute('data-idx');
+      // Find in lastScanData
+      if (lastScanData) {
+        var match = lastScanData.matches.find(function (m) { return String(m.redmine_id) === String(rid); });
+        if (match) {
+          selected.push({
+            redmine_id: match.redmine_id,
+            redmine_name: match.redmine_name,
+            matrix_localpart: match.matrix_localpart || '',
+          });
+        }
       }
     });
 
     console.log('[parse] Selected users count:', selected.length);
 
     if (selected.length === 0) {
-      console.warn('[parse] No users selected');
       if (typeof toast !== 'undefined') {
         toast.warning('Выберите хотя бы одного пользователя');
       }
@@ -229,7 +244,6 @@
     createBtn.textContent = 'Создаю...';
 
     try {
-      console.log('[parse] Sending bulk-create request with', selected.length, 'users');
       var r = await fetch('/api/users/bulk-create', {
         method: 'POST',
         headers: {
@@ -242,9 +256,7 @@
         }),
       });
 
-      console.log('[parse] Bulk-create response status:', r.status);
       var data = await r.json();
-      console.log('[parse] Bulk-create response data:', data);
 
       if (!r.ok) {
         if (typeof toast !== 'undefined') {
@@ -276,7 +288,7 @@
   // ── Select all ───────────────────────────────────────────────
 
   function toggleSelectAll(checked) {
-    resultsBody.querySelectorAll('.parse-cb:not([disabled])').forEach(function (cb) {
+    gridNew.querySelectorAll('.card-cb').forEach(function (cb) {
       cb.checked = checked;
     });
     updateSelectedCount();
@@ -287,9 +299,7 @@
   if (!startBtn) {
     console.error('[parse] startBtn not found!');
   } else {
-    console.log('[parse] startBtn found, attaching listener');
     startBtn.addEventListener('click', function () {
-      console.log('[parse] startBtn clicked');
       startScan();
     });
   }
@@ -298,15 +308,20 @@
   if (selectAllCb) {
     selectAllCb.addEventListener('change', function () {
       toggleSelectAll(this.checked);
-      if (selectAllHeader) selectAllHeader.checked = this.checked;
     });
   }
-  if (selectAllHeader) {
-    selectAllHeader.addEventListener('change', function () {
-      toggleSelectAll(this.checked);
-      if (selectAllCb) selectAllCb.checked = this.checked;
-    });
-  }
+
+  // Live update on individual checkboxes
+  gridNew.addEventListener('change', function (e) {
+    if (e.target.classList.contains('card-cb')) {
+      updateSelectedCount();
+      // Check if "Select All" needs updating
+      var total = gridNew.querySelectorAll('.card-cb').length;
+      var checked = gridNew.querySelectorAll('.card-cb:checked').length;
+      selectAllCb.checked = (checked === total && total > 0);
+      selectAllCb.indeterminate = (checked > 0 && checked < total);
+    }
+  });
 
   if (targetUrlInput) {
     targetUrlInput.addEventListener('keydown', function (e) {

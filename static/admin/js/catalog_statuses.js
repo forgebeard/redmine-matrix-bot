@@ -1,19 +1,12 @@
 /**
- * Управление справочником статусов Redmine.
- * Три колонки: Все статусы | По умолчанию | Корзина
+ * Универсальный менеджер справочников Redmine.
+ * Управление Статусами, Версиями и Приоритетами.
+ * Три колонки: Все | По умолчанию | Корзина
  * Drag-and-drop между колонками.
  */
 (function () {
   'use strict';
 
-  var allContainer = document.getElementById('statuses-all-items');
-  var defaultContainer = document.getElementById('statuses-default-items');
-  var trashContainer = document.getElementById('statuses-trash-items');
-  var syncBtn = document.getElementById('sync-statuses-btn');
-  var addNameInput = document.getElementById('status-add-name');
-  var addBtn = document.getElementById('status-add-btn');
-
-  var allStatuses = [];
   var csrfToken = '';
 
   function getCsrfToken() {
@@ -22,149 +15,154 @@
     return csrfToken;
   }
 
-  async function loadStatuses() {
-    try {
-      var r = await fetch('/api/catalog/statuses', { credentials: 'same-origin' });
-      if (!r.ok) { console.error('[statuses] API returned', r.status); return; }
-      var data = await r.json();
-      allStatuses = data.statuses || [];
-      render();
-    } catch (e) { console.error('[statuses] Failed to load:', e); }
+  // ── CatalogManager ──────────────────────────────────────────────
+
+  function CatalogManager(config) {
+    var self = this;
+    self.config = config;
+    self.items = [];
+    self.dragDropInitialized = false;
+
+    self.allContainer = document.getElementById(config.prefix + '-all-items');
+    self.defaultContainer = document.getElementById(config.prefix + '-default-items');
+    self.trashContainer = document.getElementById(config.prefix + '-trash-items');
+
+    var addInput = document.getElementById(config.prefix + '-add-name');
+    var addBtn = document.getElementById(config.prefix + '-add-btn');
+    if (addBtn) {
+      addBtn.addEventListener('click', function () {
+        var name = addInput.value.trim();
+        if (!name) { showToastMsg(config, 'Введите название', true); return; }
+        var fd = new FormData();
+        fd.append('redmine_' + config.singular + '_id', '0');
+        fd.append('name', name);
+        fd.append('csrf_token', getCsrfToken());
+        fetch('/api/catalog/' + config.plural, { method: 'POST', credentials: 'same-origin', body: fd })
+          .then(function (r) { return r.json(); })
+          .then(function (data) {
+            if (data.ok || data.id) {
+              addInput.value = '';
+              self.items.push(data);
+              self.render();
+              showToastMsg(config, config.label + ' добавлен');
+            } else {
+              showToastMsg(config, data.error || 'Ошибка', true);
+            }
+          });
+      });
+    }
   }
 
-  function render() {
-    if (!allContainer || !defaultContainer || !trashContainer) return;
+  CatalogManager.prototype.load = function () {
+    var self = this;
+    fetch('/api/catalog/' + self.config.plural, { credentials: 'same-origin' })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        self.items = data[self.config.plural] || [];
+        self.render();
+      });
+  };
 
-    var active = allStatuses.filter(function (s) { return s.is_active !== false; });
+  CatalogManager.prototype.render = function () {
+    var self = this;
+    if (!self.allContainer || !self.defaultContainer || !self.trashContainer) return;
+
+    var active = self.items.filter(function (s) { return s.is_active !== false; });
     var isDefault = active.filter(function (s) { return s.is_default === true; });
     var notDefault = active.filter(function (s) { return s.is_default !== true; });
-    var trashed = allStatuses.filter(function (s) { return s.is_active === false; });
+    var trashed = self.items.filter(function (s) { return s.is_active === false; });
 
-    allContainer.innerHTML = notDefault.map(renderItem).join('');
-    defaultContainer.innerHTML = isDefault.map(renderItem).join('');
-    trashContainer.innerHTML = trashed.map(function (s) {
+    self.allContainer.innerHTML = notDefault.map(function (s) { return self.renderItem(s); }).join('');
+    self.defaultContainer.innerHTML = isDefault.map(function (s) { return self.renderItem(s); }).join('');
+    self.trashContainer.innerHTML = trashed.map(function (s) {
       return '<div class="status-item" draggable="true" data-id="' + s.id + '" data-name="' + escAttr(s.name) + '">' +
         '<span class="status-item-name">' + escHtml(s.name) + '</span>' +
         '<button type="button" class="status-item-del" data-action="restore" title="Восстановить">↩</button>' +
         '</div>';
     }).join('');
 
-    updateCounts(isDefault.length, trashed.length);
-    setupDragDrop();
-  }
+    updateCounts(self.config.prefix, isDefault.length, trashed.length);
+    self.setupDragDrop();
+  };
 
-  function renderItem(s) {
+  CatalogManager.prototype.renderItem = function (s) {
     return '<div class="status-item" draggable="true" data-id="' + s.id + '" data-name="' + escAttr(s.name) + '">' +
       '<span class="status-item-name">' + escHtml(s.name) + '</span>' +
       '<button type="button" class="status-item-del" data-action="trash" title="В корзину">✕</button>' +
       '</div>';
-  }
+  };
 
-  function escHtml(s) { var d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
-  function escAttr(s) { return (s || '').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
-
-  function updateCounts(defCount, trashCount) {
-    var defEl = document.getElementById('statuses-default-count');
-    var trashEl = document.getElementById('statuses-trash-count');
-    if (defEl) { defEl.textContent = defCount; defEl.classList.toggle('visible', defCount > 0); }
-    if (trashEl) { trashEl.textContent = trashCount; trashEl.classList.toggle('visible', trashCount > 0); }
-  }
-
-  // ── Toggle API ─────────────────────────────────────────────────
-
-  function toggleField(id, field, cb) {
-    fetch('/api/catalog/statuses/' + id + '/toggle?field=' + field, {
-      method: 'POST',
-      credentials: 'same-origin',
+  CatalogManager.prototype.toggleField = function (id, field) {
+    var self = this;
+    fetch('/api/catalog/' + self.config.plural + '/' + id + '/toggle?field=' + field, {
+      method: 'POST', credentials: 'same-origin',
       headers: { 'X-CSRF-Token': getCsrfToken() },
       body: JSON.stringify({ csrf_token: getCsrfToken() }),
     }).then(function (r) { return r.json(); })
-      .then(function (data) { if (data.ok) { loadStatuses(); if (cb) cb(); } });
-  }
+      .then(function (data) { if (data.ok) self.load(); });
+  };
 
-  function moveToTrash(id, name) {
-    toggleField(id, 'is_active');
-  }
-  function restoreFromTrash(id) {
-    toggleField(id, 'is_active');
-  }
-  function moveToDefault(id) {
-    toggleField(id, 'is_default');
-  }
-  function removeFromDefault(id) {
-    toggleField(id, 'is_default');
-  }
-  function permanentDelete(id) {
-    showConfirm('Удалить статус навсегда? Он будет удалён у всех пользователей и групп.', function () {
-      fetch('/api/catalog/statuses/' + id, {
-        method: 'DELETE',
-        credentials: 'same-origin',
+  CatalogManager.prototype.permanentDelete = function (id) {
+    var self = this;
+    showConfirm('Удалить «' + (self.items.find(function (x) { return String(x.id) === String(id); }) || {}).name + '» навсегда? Он будет удалён у всех пользователей и групп.', function () {
+      fetch('/api/catalog/' + self.config.plural + '/' + id, {
+        method: 'DELETE', credentials: 'same-origin',
         headers: { 'X-CSRF-Token': getCsrfToken() },
       }).then(function (r) { return r.json(); })
         .then(function (data) {
-          if (data.ok) {
-            var msg = 'Статус удалён';
-            if (data.affected_users) msg += ', затронуто пользователей: ' + data.affected_users;
-            if (data.affected_groups) msg += ', групп: ' + data.affected_groups;
-            showToastMsg(msg);
-            loadStatuses();
-          } else {
-            showToastMsg(data.error || 'Ошибка', true);
-          }
+          if (data.ok) { self.load(); showToastMsg(self.config, self.config.label + ' удалён'); }
+          else { showToastMsg(self.config, data.error || 'Ошибка', true); }
         });
     });
-  }
+  };
 
-  // ── Drag and Drop ──────────────────────────────────────────────
+  CatalogManager.prototype.setupDragDrop = function () {
+    var self = this;
+    if (self.dragDropInitialized) return;
+    self.dragDropInitialized = true;
 
-  var dragSrcEl = null;
-  var dragDropInitialized = false;
-
-  function setupDragDrop() {
-    if (dragDropInitialized) return;
-    dragDropInitialized = true;
-
-    var zones = [allContainer, defaultContainer, trashContainer];
+    var zones = [self.allContainer, self.defaultContainer, self.trashContainer];
     zones.forEach(function (zone) {
       zone.addEventListener('dragstart', function (e) {
         var item = e.target.closest('.status-item');
         if (!item) return;
-        dragSrcEl = item;
         e.dataTransfer.effectAllowed = 'move';
         e.dataTransfer.setData('text/plain', item.getAttribute('data-id'));
         item.classList.add('dragging');
       });
-      zone.addEventListener('dragend', handleDragEnd);
+      zone.addEventListener('dragend', handleGlobalDragEnd);
       zone.addEventListener('dragover', handleDragOver);
       zone.addEventListener('dragleave', handleDragLeave);
-      zone.addEventListener('drop', handleDrop);
+      zone.addEventListener('drop', function (e) {
+        handleGlobalDrop.call(this, e, self);
+      });
     });
 
-    // Button handlers
-    allContainer.addEventListener('click', function (e) {
+    self.allContainer.addEventListener('click', function (e) {
       var btn = e.target.closest('[data-action="trash"]');
       if (!btn) return;
       var item = btn.closest('.status-item');
-      if (item) moveToTrash(item.getAttribute('data-id'), item.getAttribute('data-name'));
+      if (item) self.toggleField(item.getAttribute('data-id'), 'is_active');
     });
-    defaultContainer.addEventListener('click', function (e) {
+    self.defaultContainer.addEventListener('click', function (e) {
       var btn = e.target.closest('[data-action="trash"]');
       if (!btn) return;
       var item = btn.closest('.status-item');
-      if (item) moveToTrash(item.getAttribute('data-id'), item.getAttribute('data-name'));
+      if (item) self.toggleField(item.getAttribute('data-id'), 'is_active');
     });
-    trashContainer.addEventListener('click', function (e) {
+    self.trashContainer.addEventListener('click', function (e) {
       var btn = e.target.closest('[data-action="restore"]');
       if (!btn) return;
       var item = btn.closest('.status-item');
-      if (item) restoreFromTrash(item.getAttribute('data-id'));
+      if (item) self.toggleField(item.getAttribute('data-id'), 'is_active');
     });
-
-    trashContainer.addEventListener('dblclick', function (e) {
+    self.trashContainer.addEventListener('dblclick', function (e) {
       var item = e.target.closest('.status-item');
-      if (!item) permanentDelete(parseInt(item.getAttribute('data-id'), 10));
+      if (item) self.permanentDelete(parseInt(item.getAttribute('data-id'), 10));
     });
-  }
+  };
+
+  // ── Global drag-and-drop handlers ───────────────────────────────
 
   function handleDragOver(e) {
     if (e.preventDefault) e.preventDefault();
@@ -172,39 +170,96 @@
     this.classList.add('drag-over');
     return false;
   }
+
   function handleDragLeave() { this.classList.remove('drag-over'); }
 
-  function handleDrop(e) {
+  function handleGlobalDrop(e, manager) {
     if (e.stopPropagation) e.stopPropagation();
     this.classList.remove('drag-over');
-    if (!dragSrcEl) return false;
+    var id = e.dataTransfer.getData('text/plain');
+    if (!id) return false;
 
-    var id = dragSrcEl.getAttribute('data-id');
-    var name = dragSrcEl.getAttribute('data-name');
-    var isAll = this === allContainer;
-    var isDefault = this === defaultContainer;
-    var isTrash = this === trashContainer;
+    var targetZone = this;
+    var isAll = targetZone === manager.allContainer;
+    var isDefault = targetZone === manager.defaultContainer;
+    var isTrash = targetZone === manager.trashContainer;
 
-    if (isTrash && !dragSrcEl.closest('.statuses-trash-col')) {
-      moveToTrash(id, name);
-    } else if (isAll && dragSrcEl.closest('.statuses-trash-col')) {
-      restoreFromTrash(id);
-    } else if (isDefault && dragSrcEl.closest('.statuses-all-col')) {
-      moveToDefault(id);
-    } else if (isAll && dragSrcEl.closest('.statuses-default-col')) {
-      removeFromDefault(id);
+    // Определяем откуда тащили по родителю dragged-элемента
+    var draggedEl = document.querySelector('.status-item.dragging');
+    if (!draggedEl) return false;
+    var fromTrash = draggedEl.closest('.statuses-trash-col');
+    var fromDefault = draggedEl.closest('.statuses-default-col');
+    var fromAll = draggedEl.closest('.statuses-all-col');
+
+    if (isTrash && !fromTrash) {
+      manager.toggleField(id, 'is_active');
+    } else if (isAll && fromTrash) {
+      manager.toggleField(id, 'is_active');
+    } else if (isDefault && fromAll) {
+      manager.toggleField(id, 'is_default');
+    } else if (isAll && fromDefault) {
+      manager.toggleField(id, 'is_default');
     }
     return false;
   }
 
-  function handleDragEnd() {
-    if (dragSrcEl) dragSrcEl.classList.remove('dragging');
-    dragSrcEl = null;
+  function handleGlobalDragEnd() {
     document.querySelectorAll('.status-item').forEach(function (i) { i.classList.remove('dragging'); });
     document.querySelectorAll('.statuses-dropzone').forEach(function (z) { z.classList.remove('drag-over'); });
   }
 
-  // ── Confirm / Toast ────────────────────────────────────────────
+  // ── Managers ────────────────────────────────────────────────────
+
+  var managers = [];
+
+  function initManagers() {
+    managers = [
+      new CatalogManager({ prefix: 'statuses', plural: 'statuses', singular: 'status', label: 'Статус' }),
+      new CatalogManager({ prefix: 'versions', plural: 'versions', singular: 'version', label: 'Версия' }),
+      new CatalogManager({ prefix: 'priorities', plural: 'priorities', singular: 'priority', label: 'Приоритет' }),
+    ];
+    managers.forEach(function (m) { m.load(); });
+  }
+
+  // ── Sync all ────────────────────────────────────────────────────
+
+  var syncBtn = document.getElementById('sync-statuses-btn');
+  if (syncBtn) {
+    syncBtn.addEventListener('click', function () {
+      syncBtn.disabled = true;
+      syncBtn.textContent = 'Синхронизация…';
+      fetch('/api/catalog/sync-all', {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': getCsrfToken() },
+        body: JSON.stringify({ csrf_token: getCsrfToken() }),
+      }).then(function (r) { return r.json(); })
+        .then(function (data) {
+          if (!data.ok) { showToastMsg({ prefix: 'statuses', label: 'Статус' }, data.error || 'Ошибка синхронизации', true); return; }
+          var parts = [];
+          if (data.statuses) parts.push('Статусы: +' + (data.statuses.added||0) + ' ~' + (data.statuses.updated||0) + ' −' + (data.statuses.hidden||0));
+          if (data.versions) parts.push('Версии: +' + (data.versions.added||0) + ' ~' + (data.versions.updated||0) + ' −' + (data.versions.hidden||0));
+          if (data.priorities) parts.push('Приоритеты: +' + (data.priorities.added||0) + ' ~' + (data.priorities.updated||0) + ' −' + (data.priorities.hidden||0));
+          showToastMsg({ prefix: 'statuses', label: 'Каталог' }, 'Обновлено: ' + parts.join(', '));
+          managers.forEach(function (m) { m.load(); });
+        })
+        .finally(function () {
+          syncBtn.disabled = false;
+          syncBtn.textContent = 'Обновить из Redmine';
+        });
+    });
+  }
+
+  // ── Helpers ─────────────────────────────────────────────────────
+
+  function escHtml(s) { var d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+  function escAttr(s) { return (s || '').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
+
+  function updateCounts(prefix, defCount, trashCount) {
+    var defEl = document.getElementById(prefix + '-default-count');
+    var trashEl = document.getElementById(prefix + '-trash-count');
+    if (defEl) { defEl.textContent = defCount; defEl.classList.toggle('visible', defCount > 0); }
+    if (trashEl) { trashEl.textContent = trashCount; trashEl.classList.toggle('visible', trashCount > 0); }
+  }
 
   function showConfirm(message, onOk) {
     var overlay = document.createElement('div');
@@ -219,7 +274,7 @@
     overlay.addEventListener('click', function (e) { if (e.target === overlay) close(false); });
   }
 
-  function showToastMsg(text, isError) {
+  function showToastMsg(config, text, isError) {
     var t = document.createElement('div');
     t.className = 'custom-toast' + (isError ? ' custom-toast--error' : '');
     t.textContent = text;
@@ -228,53 +283,7 @@
     setTimeout(function () { t.classList.remove('show'); setTimeout(function () { t.remove(); }, 400); }, 3000);
   }
 
-  // ── Add status ─────────────────────────────────────────────────
+  // ── Init ────────────────────────────────────────────────────────
 
-  if (addBtn) {
-    addBtn.addEventListener('click', async function () {
-      var name = addNameInput.value.trim();
-      if (!name) { showToastMsg('Введите название', true); return; }
-      var fd = new FormData();
-      fd.append('redmine_status_id', '0');
-      fd.append('name', name);
-      fd.append('csrf_token', getCsrfToken());
-      try {
-        var r = await fetch('/api/catalog/statuses', { method: 'POST', credentials: 'same-origin', body: fd });
-        var data = await r.json();
-        if (!r.ok) { showToastMsg(data.error || 'Ошибка', true); return; }
-        addNameInput.value = '';
-        allStatuses.push(data);
-        render();
-        showToastMsg('Статус добавлен');
-      } catch (e) { showToastMsg('Ошибка сети: ' + e.message, true); }
-    });
-  }
-
-  // ── Sync ──────────────────────────────────────────────────────
-
-  if (syncBtn) {
-    syncBtn.addEventListener('click', async function () {
-      syncBtn.disabled = true;
-      syncBtn.textContent = 'Синхронизация…';
-      try {
-        var r = await fetch('/api/catalog/sync-statuses', {
-          method: 'POST', credentials: 'same-origin',
-          headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': getCsrfToken() },
-          body: JSON.stringify({ csrf_token: getCsrfToken() }),
-        });
-        var data = await r.json();
-        if (!r.ok) { showToastMsg(data.error || 'Ошибка синхронизации', true); return; }
-        var parts = [];
-        parts.push(data.total + ' статусов');
-        if (data.added) parts.push('+' + data.added);
-        if (data.updated) parts.push('~' + data.updated);
-        if (data.hidden) parts.push('−' + data.hidden + ' скрыто');
-        showToastMsg('Статусы обновлены: ' + parts.join(', '));
-        loadStatuses();
-      } catch (e) { showToastMsg('Ошибка сети: ' + e.message, true); }
-      finally { syncBtn.disabled = false; syncBtn.textContent = 'Обновить из Redmine'; }
-    });
-  }
-
-  loadStatuses();
+  initManagers();
 })();

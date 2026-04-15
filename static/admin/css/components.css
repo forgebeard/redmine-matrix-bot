@@ -319,47 +319,144 @@ td.cell-form input[type="text"] {
   width: 92%;
 }
 
-.parse-summary {
-  display: flex; gap: 1.5rem; flex-wrap: wrap;
-  margin-bottom: 0.75rem; padding: 0.5rem 0;
+/* ── Parse Results Grid ─────────────────────────────────────────── */
+.parse-section-title {
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+  margin: 1rem 0 0.5rem;
   border-bottom: 1px solid var(--border);
+  padding-bottom: 0.25rem;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
-.parse-summary span { font-size: 0.9rem; }
-.parse-summary .found { color: var(--green); }
-.parse-summary .existing { color: var(--cyan); }
-.parse-summary .not-found { color: var(--red); }
+.parse-section-title--dimmed { opacity: 0.6; }
 
-.parse-controls {
-  display: flex; align-items: center; gap: 1rem;
+/* Чекбокс "Выбрать всех" внутри заголовка */
+.parse-section-select-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  cursor: pointer;
+  user-select: none;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  font-weight: 600;
+  color: var(--fg-muted);
+}
+.parse-section-select-all input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent-500);
+  cursor: pointer;
+}
+
+/* Счётчик "Выбрано: X из Y" */
+#parse-selected-count {
+  font-size: 0.8rem;
+  font-weight: 400;
+  text-transform: none;
+}
+
+/* Сетка: 4 колонки */
+.parse-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.4rem;
+  max-height: 400px;
+  overflow-y: auto;
+  overflow-x: hidden;
   margin-bottom: 0.5rem;
 }
 
-.checkbox-label {
-  display: flex; align-items: center; gap: 0.4rem;
-  font-size: 0.9rem; cursor: pointer; user-select: none;
-}
-.checkbox-label input[type="checkbox"] {
-  accent-color: var(--accent-500); width: 1rem; height: 1rem;
+/* Карточка пользователя */
+.parse-card {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-elevated);
+  font-size: 0.82rem;
+  min-width: 0;
+  overflow: hidden;
 }
 
-.parse-table {
-  width: 100%; border-collapse: collapse; font-size: 0.88rem;
+.parse-card .card-cb {
+  accent-color: var(--accent-500);
+  cursor: pointer;
+  width: 16px;
+  height: 16px;
 }
-.parse-table th {
-  text-align: left; padding: 0.5rem 0.4rem;
-  border-bottom: 1px solid var(--border); color: var(--fg-muted);
-  font-weight: 500; font-size: 0.8rem; text-transform: uppercase;
-}
-.parse-table td {
-  padding: 0.45rem 0.4rem; border-bottom: 1px solid rgba(255,255,255,0.04);
-  vertical-align: middle;
-}
-.parse-table tr:hover { background: rgba(255,255,255,0.02); }
-.parse-table input[type="checkbox"] { accent-color: var(--accent-500); }
 
-.status-found { color: var(--green); }
-.status-existing { color: var(--cyan); }
-.status-not-found { color: var(--red); }
+.parse-card .card-info {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.parse-card .card-name {
+  font-weight: 500;
+  color: var(--fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 0.82rem;
+}
+
+.parse-card .card-meta {
+  display: flex;
+  gap: 0.4rem;
+  font-size: 0.72rem;
+  color: var(--fg-muted);
+  min-width: 0;
+}
+
+.parse-card .card-id {
+  font-family: monospace;
+  white-space: nowrap;
+}
+
+.parse-card .card-matrix {
+  color: var(--green);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.parse-card .card-matrix.not-found { color: var(--red); }
+
+/* Существующие пользователи */
+.parse-card.existing {
+  opacity: 0.5;
+  background: rgba(255,255,255,0.02);
+  cursor: default;
+  border-color: transparent;
+}
+.parse-card.existing:hover {
+  border-color: transparent;
+  background: rgba(255,255,255,0.02);
+}
+.parse-card.existing .card-name {
+  color: var(--fg-muted);
+  font-weight: 400;
+}
+
+/* Адаптив: на узких экранах меньше колонок */
+@media (max-width: 1200px) {
+  .parse-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 800px) {
+  .parse-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 500px) {
+  .parse-grid { grid-template-columns: 1fr; }
+}
 
 /* ── Settings Tabs ─────────────────────────────────────────────── */
 .settings-tabs {
@@ -386,6 +483,8 @@ td.cell-form input[type="text"] {
 }
 .service-bubble--statuses { grid-column: 1 / -1; }
 #tab-dictionary .service-bubble { margin-bottom: 1rem; }
+.service-bubble--versions { grid-column: 1 / -1; }
+.service-bubble--priorities { grid-column: 1 / -1; }
 .statuses-col { min-width: 0; }
 .statuses-all-col { /* left column */ }
 .statuses-default-col { /* middle column */ }

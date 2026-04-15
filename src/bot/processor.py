@@ -7,6 +7,7 @@ check_user_issues — ядро бота: загрузка из Redmine, дете
 from __future__ import annotations
 
 import logging
+from bot.async_utils import run_in_thread
 from collections.abc import Callable
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
@@ -52,7 +53,7 @@ async def check_user_issues(
     uid = user_cfg["redmine_id"]
     room = user_cfg["room"]
 
-    # ── Загружаем задачи из Redmine (инкрементально) ──
+    # ── Загружаем задачи из Redmine (инкрементально, в thread pool) ──
     last_check = last_check_time.get(uid)
     try:
         params: dict = {
@@ -62,7 +63,11 @@ async def check_user_issues(
         }
         if last_check:
             params["updated_on"] = f">={last_check.isoformat()}"
-            issues = list(redmine.issue.filter(**params))
+
+        # redminelib — синхронная, выносим в thread чтобы не блокировать event loop
+        issues = await run_in_thread(lambda: list(redmine.issue.filter(**params)))
+
+        if last_check:
             logger.info(
                 "👤 User %s: %d задач (обновлено с %s)",
                 uid,
@@ -70,7 +75,6 @@ async def check_user_issues(
                 last_check.strftime("%H:%M:%S"),
             )
         else:
-            issues = list(redmine.issue.filter(**params))
             logger.info("👤 User %s: %d задач (полная загрузка)", uid, len(issues))
     except Exception as e:
         _log_redmine_list_error(uid, e, "загрузка задач")

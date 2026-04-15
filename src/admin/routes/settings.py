@@ -100,7 +100,9 @@ def _mask_secret_value(name: str, value: str) -> str:
     """Маскирует секрет. URL'ы и MXID не маскируются."""
     if name in _UNMASKED_SECRETS:
         return value
-    if not value or len(value) <= 8:
+    if not value:
+        return ""
+    if len(value) <= 8:
         return "••••••••"
     return value[:4] + "•" * (len(value) - 8) + value[-4:]
 

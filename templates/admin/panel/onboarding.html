@@ -44,7 +44,7 @@
                      data-real-value="{{ secrets_raw.get('REDMINE_API_KEY', '') }}"
                      data-masked-value="{{ secrets_masked.get('REDMINE_API_KEY', '') }}"
                      placeholder="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-                     autocomplete="off"/>
+                     autocomplete="new-password"/>
               <button type="button" class="toggle-visibility" data-target="secret_REDMINE_API_KEY" aria-label="Показать/скрыть">
                 <i class="fa-solid fa-eye"></i>
               </button>
@@ -64,7 +64,7 @@
             <label for="secret_MATRIX_USER_ID">Имя учётной записи</label>
             <input id="secret_MATRIX_USER_ID" name="secret_MATRIX_USER_ID" type="text"
                    value="{{ secrets_masked.get('MATRIX_USER_ID', '') }}"
-                   placeholder="@login:ваш.домен" autocomplete="username"/>
+                   placeholder="@login:ваш.домен" autocomplete="off"/>
           </div>
           <div class="field">
             <label for="secret_MATRIX_ACCESS_TOKEN">Токен</label>
@@ -73,7 +73,7 @@
                      value="{{ secrets_masked.get('MATRIX_ACCESS_TOKEN', '') }}"
                      data-real-value="{{ secrets_raw.get('MATRIX_ACCESS_TOKEN', '') }}"
                      data-masked-value="{{ secrets_masked.get('MATRIX_ACCESS_TOKEN', '') }}"
-                     placeholder="syt_xxxxxxxxxxxxxxxxxxx" autocomplete="off"/>
+                     placeholder="syt_xxxxxxxxxxxxxxxxxxx" autocomplete="new-password"/>
               <button type="button" class="toggle-visibility" data-target="secret_MATRIX_ACCESS_TOKEN" aria-label="Показать/скрыть">
                 <i class="fa-solid fa-eye"></i>
               </button>
@@ -108,7 +108,7 @@
           <div class="field">
             <label for="db_password">Пароль БД</label>
             <div class="input-with-toggle">
-              <input id="db_password" type="password" readonly value="{{ db_config.postgres_password }}"/>
+              <input id="db_password" type="password" readonly value="{{ db_config.postgres_password }}" autocomplete="new-password"/>
               <button type="button" class="toggle-visibility" data-target="db_password" aria-label="Показать/скрыть">
                 <i class="fa-solid fa-eye"></i>
               </button>
@@ -117,7 +117,7 @@
           <div class="field">
             <label for="master_key">Мастер-ключ</label>
             <div class="input-with-toggle">
-              <input id="master_key" type="password" readonly value="{{ db_config.app_master_key }}"/>
+              <input id="master_key" type="password" readonly value="{{ db_config.app_master_key }}" autocomplete="new-password"/>
               <button type="button" class="toggle-visibility" data-target="master_key" aria-label="Показать/скрыть">
                 <i class="fa-solid fa-eye"></i>
               </button>
@@ -168,28 +168,22 @@
         <!-- Шаг 3: результаты -->
         <div id="parse-step-results" style="display:none;">
           <div class="parse-summary" id="parse-summary"></div>
-          <div class="parse-controls">
-            <label class="checkbox-label">
+          
+          <!-- Секция: Новые -->
+          <h3 class="parse-section-title">
+            <label class="parse-section-select-all">
               <input type="checkbox" id="parse-select-all" checked/>
-              <span>Все пользователи</span>
+              <span>Новые пользователи</span>
             </label>
             <span class="muted" id="parse-selected-count"></span>
-          </div>
-          <div class="table-wrap" style="max-height:400px;overflow-y:auto;">
-            <table class="parse-table">
-              <thead>
-                <tr>
-                  <th style="width:40px;"><input type="checkbox" id="parse-select-all-header" checked/></th>
-                  <th>ФИО</th>
-                  <th>Redmine ID</th>
-                  <th>Matrix</th>
-                  <th>Статус</th>
-                </tr>
-              </thead>
-              <tbody id="parse-results-body"></tbody>
-            </table>
-          </div>
-          <div style="display:flex;gap:0.5rem;margin-top:0.75rem;">
+          </h3>
+          <div class="parse-grid" id="parse-grid-new"></div>
+
+          <!-- Секция: Уже в системе -->
+          <h3 class="parse-section-title parse-section-title--dimmed">✅ Уже в системе</h3>
+          <div class="parse-grid parse-grid--existing" id="parse-grid-existing"></div>
+
+          <div style="display:flex;gap:0.5rem;margin-top:1.5rem;">
             <button type="button" class="btn btn-primary" id="parse-create">Создать выбранных</button>
           </div>
         </div>
@@ -230,14 +224,62 @@
           <button type="button" class="btn btn-ghost" id="status-add-btn">Добавить</button>
         </div>
       </div>
-      <section class="service-bubble">
+
+      <div class="service-bubble service-bubble--versions">
         <div class="card-title">Версии</div>
-        <p class="muted">Скоро: автоматический импорт версий из Redmine</p>
-      </section>
-      <section class="service-bubble">
-        <div class="card-title">Приоритет</div>
-        <p class="muted">Скоро: управление приоритетами задач</p>
-      </section>
+        <div class="statuses-manager">
+          <div class="statuses-col statuses-all-col">
+            <div class="statuses-col-label">Все версии</div>
+            <div class="statuses-items statuses-dropzone" id="versions-all-items"></div>
+          </div>
+          <div class="statuses-col statuses-default-col">
+            <div class="statuses-col-label">
+              По умолчанию
+              <span class="trash-count" id="versions-default-count"></span>
+            </div>
+            <div class="statuses-items statuses-dropzone" id="versions-default-items"></div>
+          </div>
+          <div class="statuses-col statuses-trash-col">
+            <div class="statuses-col-label">
+              <i class="fa-solid fa-trash-can"></i> Корзина
+              <span class="trash-count" id="versions-trash-count"></span>
+            </div>
+            <div class="statuses-items statuses-dropzone" id="versions-trash-items"></div>
+          </div>
+        </div>
+        <div class="catalog-add">
+          <input id="version-add-name" type="text" placeholder="Название версии" style="flex:1;"/>
+          <button type="button" class="btn btn-ghost" id="version-add-btn">Добавить</button>
+        </div>
+      </div>
+
+      <div class="service-bubble service-bubble--priorities">
+        <div class="card-title">Приоритеты</div>
+        <div class="statuses-manager">
+          <div class="statuses-col statuses-all-col">
+            <div class="statuses-col-label">Все приоритеты</div>
+            <div class="statuses-items statuses-dropzone" id="priorities-all-items"></div>
+          </div>
+          <div class="statuses-col statuses-default-col">
+            <div class="statuses-col-label">
+              По умолчанию
+              <span class="trash-count" id="priorities-default-count"></span>
+            </div>
+            <div class="statuses-items statuses-dropzone" id="priorities-default-items"></div>
+          </div>
+          <div class="statuses-col statuses-trash-col">
+            <div class="statuses-col-label">
+              <i class="fa-solid fa-trash-can"></i> Корзина
+              <span class="trash-count" id="priorities-trash-count"></span>
+            </div>
+            <div class="statuses-items statuses-dropzone" id="priorities-trash-items"></div>
+          </div>
+        </div>
+        <div class="catalog-add">
+          <input id="priority-add-name" type="text" placeholder="Название приоритета" style="flex:1;"/>
+          <button type="button" class="btn btn-ghost" id="priority-add-btn">Добавить</button>
+        </div>
+      </div>
     </div>
 
   </form>

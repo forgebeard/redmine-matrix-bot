@@ -84,9 +84,15 @@ async def groups_new(
     user = getattr(request.state, "current_user", None)
     if not user or getattr(user, "role", "") != "admin":
         raise HTTPException(403, "Только admin")
+
     statuses_catalog = await admin._load_statuses_catalog(session)
-    _nc, versions_catalog = await admin._load_catalogs(session)
-    status_default_keys = [item["key"] for item in statuses_catalog]
+    versions_catalog = await admin._load_versions_catalog(session)
+    priorities_catalog = await admin._load_priorities_catalog(session)
+
+    status_default_keys = [item["key"] for item in statuses_catalog if item.get("is_default")]
+    version_default_keys = [item["key"] for item in versions_catalog if item.get("is_default")]
+    priority_default_keys = [item["key"] for item in priorities_catalog if item.get("is_default")]
+
     return admin.templates.TemplateResponse(
         request,
         "panel/group_form.html",
@@ -100,14 +106,21 @@ async def groups_new(
             "status_routes": [],
             "status_err": "",
             "status_msg": "",
-            "status_json": '["all"]',
+            # Статусы
+            "status_json": json.dumps(status_default_keys, ensure_ascii=False),
             "status_preset": "default",
             "status_selected": status_default_keys,
             "statuses_catalog": statuses_catalog,
+            # Версии
+            "version_json": json.dumps(version_default_keys, ensure_ascii=False),
+            "version_preset": "default",
+            "version_selected": version_default_keys,
             "versions_catalog": versions_catalog,
-            "initial_version_keys": "",
-            "selected_version_keys": [],
-            "version_preset": "all",
+            # Приоритеты
+            "priority_json": json.dumps(priority_default_keys, ensure_ascii=False),
+            "priority_preset": "default",
+            "priority_selected": priority_default_keys,
+            "priorities_catalog": priorities_catalog,
         },
     )
 
@@ -211,10 +224,12 @@ async def groups_edit(
         raise HTTPException(404, "Группа не найдена")
     if admin._is_reserved_support_group(row):
         raise HTTPException(404, "Группа не найдена")
+
     status_err = (request.query_params.get("status_err") or "").strip()
     status_msg = (request.query_params.get("status_msg") or "").strip()
     version_err = (request.query_params.get("version_err") or "").strip()
     version_msg = (request.query_params.get("version_msg") or "").strip()
+
     room = (row.room_id or "").strip()
     sr_stmt = (
         select(StatusRoomRoute)
@@ -222,24 +237,43 @@ async def groups_edit(
         .order_by(StatusRoomRoute.status_key)
     )
     status_rows = list((await session.execute(sr_stmt)).scalars().all()) if room else []
+
     gv_stmt = (
         select(GroupVersionRoute)
         .where(GroupVersionRoute.group_id == group_id)
         .order_by(GroupVersionRoute.version_key)
     )
     version_rows = list((await session.execute(gv_stmt)).scalars().all())
+
+    # Загружаем каталоги (формат [{key, label, is_default}, ...])
     statuses_catalog = await admin._load_statuses_catalog(session)
-    _nc, versions_catalog = await admin._load_catalogs(session)
+    versions_catalog = await admin._load_versions_catalog(session)
+    priorities_catalog = await admin._load_priorities_catalog(session)
+
+    # ── Статусы ──
     status_keys = {item["key"] for item in statuses_catalog}
-    status_default_keys = [item["key"] for item in statuses_catalog]
+    status_default_keys = [item["key"] for item in statuses_catalog if item.get("is_default")]
     notify_selected = [str(x).strip() for x in (row.notify or ["all"]) if str(x).strip()]
     preset = admin._status_preset(row.notify)
     if preset == "default":
         status_selected = status_default_keys
     else:
         status_selected = [k for k in notify_selected if k in status_keys]
-    version_set = set(versions_catalog)
-    selected_versions = [r.version_key for r in version_rows if r.version_key in version_set]
+
+    # ── Версии ──
+    version_default_keys = [item["key"] for item in versions_catalog if item.get("is_default")]
+    version_selected = row.versions or []
+    version_preset = "default" if (not version_selected or version_selected == ["all"]) else "custom"
+    if version_preset == "default":
+        version_selected = version_default_keys
+
+    # ── Приоритеты ──
+    priority_default_keys = [item["key"] for item in priorities_catalog if item.get("is_default")]
+    priority_selected = row.priorities or []
+    priority_preset = "default" if (not priority_selected or priority_selected == ["all"]) else "custom"
+    if priority_preset == "default":
+        priority_selected = priority_default_keys
+
     return admin.templates.TemplateResponse(
         request,
         "panel/group_form.html",
@@ -256,13 +290,21 @@ async def groups_edit(
             "version_routes": version_rows,
             "version_err": version_err,
             "version_msg": version_msg,
+            # Статусы
             "status_json": json.dumps(row.notify, ensure_ascii=False),
             "status_preset": preset,
             "status_selected": status_selected,
             "statuses_catalog": statuses_catalog,
+            # Версии
+            "version_json": json.dumps(row.versions or [], ensure_ascii=False),
+            "version_preset": version_preset,
+            "version_selected": version_selected,
             "versions_catalog": versions_catalog,
-            "selected_version_keys": selected_versions,
-            "version_preset": admin._version_preset(selected_versions, versions_catalog),
+            # Приоритеты
+            "priority_json": json.dumps(row.priorities or [], ensure_ascii=False),
+            "priority_preset": priority_preset,
+            "priority_selected": priority_selected,
+            "priorities_catalog": priorities_catalog,
         },
     )
 
@@ -274,14 +316,15 @@ async def groups_create(
     room_id: Annotated[str, Form()] = "",
     timezone_name: Annotated[str, Form()] = "",
     is_active: Annotated[str | None, Form()] = None,
-    initial_status_keys: Annotated[str, Form()] = "",
-    initial_version_keys: Annotated[str, Form()] = "",
-    version_keys_json: Annotated[str, Form()] = "",
-    version_preset: Annotated[str, Form()] = "all",
-    version_values: Annotated[list[str], Form()] = [],
     status_json: Annotated[str, Form()] = "",
-    status_preset: Annotated[str, Form()] = "all",
+    status_preset: Annotated[str, Form()] = "default",
     status_values: Annotated[list[str], Form()] = [],
+    version_json: Annotated[str, Form()] = "",
+    version_preset: Annotated[str, Form()] = "default",
+    version_values: Annotated[list[str], Form()] = [],
+    priority_json: Annotated[str, Form()] = "",
+    priority_preset: Annotated[str, Form()] = "default",
+    priority_values: Annotated[list[str], Form()] = [],
     work_hours: Annotated[str, Form()] = "",
     work_hours_from: Annotated[str, Form()] = "",
     work_hours_to: Annotated[str, Form()] = "",
@@ -293,7 +336,8 @@ async def groups_create(
 ):
     admin = _admin()
     statuses_catalog = await admin._load_statuses_catalog(session)
-    _nc, versions_catalog = await admin._load_catalogs(session)
+    versions_catalog = await admin._load_versions_catalog(session)
+    priorities_catalog = await admin._load_priorities_catalog(session)
     status_allowed = [item["key"] for item in statuses_catalog]
     admin._verify_csrf(request, csrf_token)
     user = getattr(request.state, "current_user", None)
@@ -316,7 +360,32 @@ async def groups_create(
     room = (room_id or "").strip()
     if not room:
         raise HTTPException(400, "Укажите ID комнаты группы")
-    status_keys = admin._parse_status_keys_list(initial_status_keys)
+
+    # Статусы
+    if status_preset == "default":
+        notify = [item["key"] for item in statuses_catalog if item.get("is_default")]
+    elif status_preset == "custom":
+        notify = admin._normalize_notify(status_values, status_allowed)
+    else:
+        notify = admin._parse_notify(status_json)
+
+    # Версии
+    version_catalog_keys = [item["key"] for item in versions_catalog]
+    if version_preset == "default":
+        versions = [item["key"] for item in versions_catalog if item.get("is_default")]
+    elif version_preset == "custom":
+        versions = admin._normalize_versions(version_values, version_catalog_keys)
+    else:
+        versions = admin._parse_json_string_list(version_json) or ["all"]
+
+    # Приоритеты
+    priority_catalog_keys = [item["key"] for item in priorities_catalog]
+    if priority_preset == "default":
+        priorities = [item["key"] for item in priorities_catalog if item.get("is_default")]
+    elif priority_preset == "custom":
+        priorities = admin._normalize_versions(priority_values, priority_catalog_keys)
+    else:
+        priorities = admin._parse_json_string_list(priority_json) or ["all"]
     if work_hours_from and work_hours_to:
         wh_from = _validate_work_time(work_hours_from, "Время начала")
         wh_to = _validate_work_time(work_hours_to, "Время окончания")
@@ -327,22 +396,14 @@ async def groups_create(
         wd = sorted({int(v) for v in work_days_values if str(v).isdigit()})
     else:
         wd = admin._parse_work_days(work_days_json)
-    if status_preset == "default":
-        notify = ["all"]
-    elif status_preset == "new_only":
-        notify = ["new"]
-    elif status_preset == "overdue_only":
-        notify = ["overdue"]
-    elif status_preset == "custom":
-        notify = admin._normalize_notify(status_values, status_allowed)
-    else:
-        notify = admin._parse_notify(status_json)
     row = SupportGroup(
         name=n,
         room_id=room,
         timezone=(timezone_name or "").strip() or None,
         is_active=True if is_active is None else is_active in ("1", "on", "true"),
         notify=notify,
+        versions=versions,
+        priorities=priorities,
         work_hours=wh,
         work_days=wd,
         dnd=dnd in ("1", "on", "true"),
@@ -352,39 +413,14 @@ async def groups_create(
         await session.flush()
     except IntegrityError:
         raise HTTPException(400, "Не удалось создать группу: проверьте уникальность названия")
-    rid = row.id
-    for key in status_keys:
-        ex = await session.execute(
-            select(StatusRoomRoute.id).where(StatusRoomRoute.status_key == key)
-        )
-        if ex.scalar_one_or_none():
-            continue
-        session.add(StatusRoomRoute(status_key=key, room_id=room))
-    version_keys = admin._parse_json_string_list(
-        version_keys_json
-    ) or admin._parse_status_keys_list(initial_version_keys)
-    if version_preset == "default":
-        version_keys = list(versions_catalog)
-    elif version_preset == "custom":
-        version_keys = admin._normalize_versions(version_values, versions_catalog)
-    for vkey in version_keys:
-        ex = await session.execute(
-            select(GroupVersionRoute.id).where(
-                GroupVersionRoute.group_id == rid,
-                GroupVersionRoute.version_key == vkey,
-            )
-        )
-        if ex.scalar_one_or_none():
-            continue
-        session.add(GroupVersionRoute(group_id=rid, version_key=vkey, room_id=room))
     await admin._maybe_log_admin_crud(
         session,
         user,
         "group",
         "create",
-        {"id": rid, "name": n},
+        {"id": row.id, "name": n},
     )
-    return RedirectResponse(f"/groups?highlight_group_id={rid}&saved=1", status_code=303)
+    return RedirectResponse(f"/groups?highlight_group_id={row.id}&saved=1", status_code=303)
 
 
 @router.post("/groups/{group_id}")
@@ -396,12 +432,14 @@ async def groups_update(
     timezone_name: Annotated[str, Form()] = "",
     is_active: Annotated[str | None, Form()] = None,
     status_json: Annotated[str, Form()] = "",
-    status_preset: Annotated[str, Form()] = "all",
+    status_preset: Annotated[str, Form()] = "default",
     status_values: Annotated[list[str], Form()] = [],
-    version_preset: Annotated[str, Form()] = "all",
+    version_json: Annotated[str, Form()] = "",
+    version_preset: Annotated[str, Form()] = "default",
     version_values: Annotated[list[str], Form()] = [],
-    version_keys_json: Annotated[str, Form()] = "",
-    initial_version_keys: Annotated[str, Form()] = "",
+    priority_json: Annotated[str, Form()] = "",
+    priority_preset: Annotated[str, Form()] = "default",
+    priority_values: Annotated[list[str], Form()] = [],
     work_hours: Annotated[str, Form()] = "",
     work_hours_from: Annotated[str, Form()] = "",
     work_hours_to: Annotated[str, Form()] = "",
@@ -413,7 +451,8 @@ async def groups_update(
 ):
     admin = _admin()
     statuses_catalog = await admin._load_statuses_catalog(session)
-    _nc, versions_catalog = await admin._load_catalogs(session)
+    versions_catalog = await admin._load_versions_catalog(session)
+    priorities_catalog = await admin._load_priorities_catalog(session)
     status_allowed = [item["key"] for item in statuses_catalog]
     admin._verify_csrf(request, csrf_token)
     user = getattr(request.state, "current_user", None)
@@ -448,16 +487,32 @@ async def groups_update(
         wd = sorted({int(v) for v in work_days_values if str(v).isdigit()})
     else:
         wd = admin._parse_work_days(work_days_json)
+
+    # Статусы
     if status_preset == "default":
-        notify = ["all"]
-    elif status_preset == "new_only":
-        notify = ["new"]
-    elif status_preset == "overdue_only":
-        notify = ["overdue"]
+        notify = [item["key"] for item in statuses_catalog if item.get("is_default")]
     elif status_preset == "custom":
         notify = admin._normalize_notify(status_values, status_allowed)
     else:
         notify = admin._parse_notify(status_json)
+
+    # Версии
+    version_catalog_keys = [item["key"] for item in versions_catalog]
+    if version_preset == "default":
+        versions = [item["key"] for item in versions_catalog if item.get("is_default")]
+    elif version_preset == "custom":
+        versions = admin._normalize_versions(version_values, version_catalog_keys)
+    else:
+        versions = admin._parse_json_string_list(version_json) or ["all"]
+
+    # Приоритеты
+    priority_catalog_keys = [item["key"] for item in priorities_catalog]
+    if priority_preset == "default":
+        priorities = [item["key"] for item in priorities_catalog if item.get("is_default")]
+    elif priority_preset == "custom":
+        priorities = admin._normalize_versions(priority_values, priority_catalog_keys)
+    else:
+        priorities = admin._parse_json_string_list(priority_json) or ["all"]
     old_room = (row.room_id or "").strip()
     new_room = (room_id or "").strip()
     row.name = n
@@ -466,48 +521,11 @@ async def groups_update(
     if is_active is not None:
         row.is_active = is_active in ("1", "on", "true")
     row.notify = notify
+    row.versions = versions
+    row.priorities = priorities
     row.work_hours = wh
     row.work_days = wd
     row.dnd = dnd in ("1", "on", "true")
-    if version_preset == "default":
-        submitted_versions = list(versions_catalog)
-    elif version_preset == "custom":
-        submitted_versions = admin._normalize_versions(version_values, versions_catalog)
-    else:
-        submitted_versions = admin._parse_json_string_list(
-            version_keys_json
-        ) or admin._parse_status_keys_list(initial_version_keys)
-    existing_routes = list(
-        (
-            await session.execute(
-                select(GroupVersionRoute).where(GroupVersionRoute.group_id == group_id)
-            )
-        )
-        .scalars()
-        .all()
-    )
-    existing_by_key = {r.version_key: r for r in existing_routes}
-    submitted_set = set(submitted_versions)
-    for r in existing_routes:
-        if r.version_key not in submitted_set:
-            await session.delete(r)
-    for key in submitted_versions:
-        ex = existing_by_key.get(key)
-        if ex:
-            ex.room_id = new_room
-            continue
-        session.add(GroupVersionRoute(group_id=group_id, version_key=key, room_id=new_room))
-    if old_room and new_room and old_room != new_room:
-        await session.execute(
-            update(StatusRoomRoute)
-            .where(StatusRoomRoute.room_id == old_room)
-            .values(room_id=new_room)
-        )
-        await session.execute(
-            update(GroupVersionRoute)
-            .where(GroupVersionRoute.group_id == group_id, GroupVersionRoute.room_id == old_room)
-            .values(room_id=new_room)
-        )
     try:
         await session.flush()
     except IntegrityError:

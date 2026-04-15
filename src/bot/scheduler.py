@@ -32,55 +32,67 @@ async def check_all_users(
     redmine_client_for_user: Callable[[Redmine, dict[str, Any]], Redmine],
     check_user_issues_fn: Callable[..., Any],
     last_check_time: dict[int, datetime],
+    max_concurrent: int = 5,
 ) -> None:
-    """Проверка задач ВСЕХ пользователей. Вызывается по таймеру."""
+    """Проверка задач ВСЕХ пользователей. Параллельно по max_concurrent."""
+    import asyncio
+
     from bot.config_state import USERS
+    from bot.sender import reset_dm_failed
     from database.session import get_session_factory
     from database.state_repo import try_acquire_user_lease
 
     start = time.monotonic()
+    reset_dm_failed()
     logger.info("🔍 Проверка в %s...", now_tz().strftime("%H:%M:%S"))
 
     session_factory = get_session_factory()
     lease_owner_id = bot_instance_id
     lease_ttl = bot_lease_ttl
     error_count = 0
+    semaphore = asyncio.Semaphore(max_concurrent)
 
-    async with session_factory() as session:
-        for user_cfg in USERS:
-            uid = user_cfg.get("redmine_id")
-            lease_until = datetime.now(UTC) + timedelta(seconds=lease_ttl)
-            try:
-                acquired = await try_acquire_user_lease(
-                    session,
-                    uid,
-                    lease_owner_id=lease_owner_id,
-                    lease_until=lease_until,
-                )
-                if not acquired:
-                    continue
+    async def _process_user(user_cfg: dict) -> None:
+        nonlocal error_count
+        uid = user_cfg.get("redmine_id")
+        lease_until = datetime.now(UTC) + timedelta(seconds=lease_ttl)
 
-                await session.commit()
-                rm_user = redmine_client_for_user(redmine, user_cfg)
-                await check_user_issues_fn(
-                    client,
-                    rm_user,
-                    user_cfg,
-                    session,
-                    now_tz=now_tz,
-                    today_tz=lambda: now_tz().date(),
-                    ensure_tz=lambda dt: dt.replace(tzinfo=UTC) if dt.tzinfo is None else dt,
-                    last_check_time=last_check_time,
-                )
-                await session.commit()
-                last_check_time[uid] = datetime.now(UTC)
-            except Exception as e:
-                logger.error("❌ DB-state цикл проверки user %s: %s", uid, e, exc_info=True)
-                error_count += 1
+        async with semaphore:
+            async with session_factory() as session:
                 try:
-                    await session.rollback()
-                except Exception:
-                    pass
+                    acquired = await try_acquire_user_lease(
+                        session,
+                        uid,
+                        lease_owner_id=lease_owner_id,
+                        lease_until=lease_until,
+                    )
+                    if not acquired:
+                        return
+
+                    await session.commit()
+                    rm_user = redmine_client_for_user(redmine, user_cfg)
+                    await check_user_issues_fn(
+                        client,
+                        rm_user,
+                        user_cfg,
+                        session,
+                        now_tz=now_tz,
+                        today_tz=lambda: now_tz().date(),
+                        ensure_tz=lambda dt: dt.replace(tzinfo=UTC) if dt.tzinfo is None else dt,
+                        last_check_time=last_check_time,
+                    )
+                    await session.commit()
+                    last_check_time[uid] = datetime.now(UTC)
+                except Exception as e:
+                    logger.error("❌ DB-state цикл проверки user %s: %s", uid, e, exc_info=True)
+                    error_count += 1
+                    try:
+                        await session.rollback()
+                    except Exception:
+                        pass
+
+    tasks = [asyncio.create_task(_process_user(u)) for u in USERS]
+    await asyncio.gather(*tasks, return_exceptions=True)
 
     elapsed = time.monotonic() - start
     try:
@@ -97,8 +109,7 @@ async def check_all_users(
     logger.info("✅ Проверка завершена за %.1fс", elapsed)
     if elapsed > check_interval * 0.8:
         logger.warning(
-            "⚠️ Цикл (%dс) > 0.8×интервала (%dс). Увеличьте CHECK_INTERVAL в .env или "
-            "сократите число пользователей/API на цикл.",
+            "⚠️ Цикл (%dс) > 0.8×интервала (%dс). Увеличьте CHECK_INTERVAL или max_concurrent.",
             int(elapsed),
             check_interval,
         )
@@ -116,6 +127,7 @@ async def daily_report(
     """Утренний отчёт (09:00) — каждому пользователю с notify=all."""
     from bot.config_state import USERS
     from bot.logic import STATUS_INFO_PROVIDED, plural_days, should_notify
+    from bot.sender import resolve_room
     from matrix_send import room_send_with_retry
     from preferences import can_notify
     from utils import safe_html
@@ -133,8 +145,18 @@ async def daily_report(
             continue
 
         uid = user_cfg["redmine_id"]
-        room = user_cfg["room"]
+        room_raw = user_cfg["room"]
         rm_user = redmine_client_for_user(redmine, user_cfg)
+
+        # Резолвим MXID → room_id через кеш (чтобы не создавать дубликат DM)
+        try:
+            room = await resolve_room(client, room_raw)
+        except Exception as e:
+            logger.error(
+                "❌ Не удалось резолвить комнату для user %s (%s): %s",
+                uid, room_raw, e,
+            )
+            continue
 
         try:
             issues = list(rm_user.issue.filter(assigned_to_id=uid, status_id="open"))

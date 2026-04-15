@@ -368,6 +368,50 @@ async def _load_statuses_catalog(session: AsyncSession) -> list[dict[str, str]]:
     ]
 
 
+async def _load_versions_catalog(session: AsyncSession) -> list[dict[str, str]]:
+    """Загружает активные версии из таблицы RedmineVersion."""
+    from sqlalchemy import select
+    from database.models import RedmineVersion
+
+    result = await session.execute(
+        select(RedmineVersion)
+        .where(RedmineVersion.is_active == True)
+        .order_by(RedmineVersion.id)
+    )
+    rows = result.scalars().all()
+    return [
+        {
+            "id": str(r.redmine_version_id),
+            "key": str(r.redmine_version_id),
+            "label": r.name,
+            "is_default": r.is_default,
+        }
+        for r in rows
+    ]
+
+
+async def _load_priorities_catalog(session: AsyncSession) -> list[dict[str, str]]:
+    """Загружает активные приоритеты из таблицы RedminePriority."""
+    from sqlalchemy import select
+    from database.models import RedminePriority
+
+    result = await session.execute(
+        select(RedminePriority)
+        .where(RedminePriority.is_active == True)
+        .order_by(RedminePriority.id)
+    )
+    rows = result.scalars().all()
+    return [
+        {
+            "id": str(r.redmine_priority_id),
+            "key": str(r.redmine_priority_id),
+            "label": r.name,
+            "is_default": r.is_default,
+        }
+        for r in rows
+    ]
+
+
 def _parse_catalog_payload(
     notify_raw: str, versions_raw: str
 ) -> tuple[list[dict[str, str]], list[str]]:

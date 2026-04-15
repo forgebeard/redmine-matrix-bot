@@ -11,3 +11,18 @@
 14.04.2026 13:14:54 [AUDIT] ADMIN_CRUD entity=bot_user action=update actor=admin entity_id=214 details={"id": "214", "redmine_id": "3658"}
 14.04.2026 14:14:45 [AUDIT] ADMIN_CRUD entity=bot_user action=update actor=admin entity_id=214 details={"id": "214", "redmine_id": "3658"}
 14.04.2026 14:24:45 [AUDIT] ADMIN_CRUD entity=bot_user action=update actor=admin entity_id=214 details={"id": "214", "redmine_id": "3658"}
+15.04.2026 07:44:56 [AUDIT] ADMIN_CRUD entity=bot_user action=bulk_delete actor=admin details={"count": "58", "ids": "[omitted]"}
+15.04.2026 08:37:31 [AUDIT] ADMIN_CRUD entity=group action=create actor=admin entity_id=4 details={"id": "4", "name": "ntc"}
+15.04.2026 08:37:37 [AUDIT] ADMIN_CRUD entity=group action=delete actor=admin entity_id=4 details={"id": "4", "name": "ntc"}
+15.04.2026 08:40:57 [AUDIT] ADMIN_CRUD entity=group action=create actor=admin entity_id=5 details={"id": "5", "name": "ТП_РЕД_ВИРТ"}
+15.04.2026 08:45:53 [AUDIT] ADMIN_CRUD entity=bot_user action=update actor=admin entity_id=78 details={"id": "78", "redmine_id": "1972"}
+15.04.2026 08:46:52 [AUDIT] ADMIN_CRUD entity=bot_user action=update actor=admin entity_id=76 details={"id": "76", "redmine_id": "1876"}
+15.04.2026 08:47:10 [AUDIT] ADMIN_CRUD entity=bot_user action=update actor=admin entity_id=105 details={"id": "105", "redmine_id": "5969"}
+15.04.2026 08:48:22 [AUDIT] ADMIN_CRUD entity=bot_user action=update actor=admin entity_id=89 details={"id": "89", "redmine_id": "3190"}
+15.04.2026 08:48:45 [AUDIT] ADMIN_CRUD entity=bot_user action=update actor=admin entity_id=105 details={"id": "105", "redmine_id": "5969"}
+15.04.2026 08:49:32 [AUDIT] ADMIN_CRUD entity=bot_user action=update actor=admin entity_id=90 details={"id": "90", "redmine_id": "3254"}
+15.04.2026 08:50:00 [AUDIT] ADMIN_CRUD entity=bot_user action=update actor=admin entity_id=104 details={"id": "104", "redmine_id": "5812"}
+15.04.2026 08:50:37 [AUDIT] ADMIN_CRUD entity=bot_user action=update actor=admin entity_id=97 details={"id": "97", "redmine_id": "4224"}
+15.04.2026 08:51:03 [AUDIT] ADMIN_CRUD entity=bot_user action=update actor=admin entity_id=67 details={"id": "67", "redmine_id": "910"}
+15.04.2026 08:51:25 [AUDIT] ADMIN_CRUD entity=bot_user action=update actor=admin entity_id=62 details={"id": "62", "redmine_id": "617"}
+15.04.2026 08:52:05 [AUDIT] ADMIN_CRUD entity=bot_user action=update actor=admin entity_id=85 details={"id": "85", "redmine_id": "2750"}
