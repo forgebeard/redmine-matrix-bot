@@ -394,6 +394,23 @@ async def main() -> None:
     else:
         logger.info("⚙ cycle_settings: таблица пуста, используются значения из .env")
 
+    # ── Загрузка справочников (каталоги) из БД ──────────────────────────────
+    from bot.catalogs import load_catalogs
+    import bot.config_state as _cs
+
+    try:
+        CATALOGS = await load_catalogs()
+        _cs.CATALOGS = CATALOGS
+        logger.info(
+            "✅ Справочники загружены: %d статусов, %d приоритетов, %d типов уведомлений",
+            len(CATALOGS.status_id_to_name),
+            len(CATALOGS.priority_id_to_name),
+            len(CATALOGS.notification_types),
+        )
+    except Exception as e:
+        logger.error("❌ Справочники не загружены: %s", e, exc_info=True)
+        return
+
     # ── Инициализация sender template ──
     import bot.sender as _sender_mod
     from bot.sender import init_template

@@ -58,6 +58,26 @@ async def check_user_issues(
         detect_status_change,
         should_notify,
     )
+
+    # Если каталоги не загружены, используем fallback на старые константы
+    from bot.config_state import CATALOGS
+
+    if CATALOGS is None:
+        logger.error("❌ КАТАЛОГИ НЕ ЗАГРУЖЕНЫ! Бот не может работать без справочников.")
+        return
+
+    # Helper для проверки статуса по ID
+    def _is_status_new(issue) -> bool:
+        return issue.status.id in CATALOGS.trigger_new_ids
+
+    def _is_status_rv(issue) -> bool:
+        return issue.status.id in CATALOGS.trigger_transferred_ids
+
+    def _is_status_info_provided(issue) -> bool:
+        return issue.status.id in CATALOGS.trigger_info_provided_ids
+
+    def _is_status_reopened(issue) -> bool:
+        return issue.status.id in CATALOGS.trigger_reopened_ids
     from bot.sender import send_safe
     from database.state_repo import load_user_issue_state
 
@@ -104,10 +124,8 @@ async def check_user_issues(
     today = now.date()
 
     # Импорт helpers из bot.logic
-    from bot.config_state import STATUS_ROOM_MAP, USERS, VERSION_ROOM_MAP
+    from bot.config_state import CATALOGS, STATUS_ROOM_MAP, USERS, VERSION_ROOM_MAP
     from bot.logic import (
-        STATUS_INFO_PROVIDED,
-        STATUS_REOPENED,
         _group_room,
     )
     from bot.logic import (
@@ -119,6 +137,10 @@ async def check_user_issues(
     from bot.logic import (
         get_extra_rooms_for_rv as _get_extra_rooms_for_rv_raw,
     )
+
+    if CATALOGS is None:
+        logger.error("❌ КАТАЛОГИ НЕ ЗАГРУЖЕНЫ! Бот не может работать без справочников.")
+        return
 
     for issue in issues:
         iid = str(issue.id)
@@ -151,7 +173,7 @@ async def check_user_issues(
                 changed_sent.add(iid)
 
             # ═══ 2. НОВАЯ ЗАДАЧА ═══
-            if issue.status.name == STATUS_NEW and iid not in sent:
+            if _is_status_new(issue) and iid not in sent:
                 if should_notify(user_cfg, "new"):
                     await send_safe(client, issue, user_cfg, room, "new")
                     for personal_room in _group_member_rooms(user_cfg):
@@ -164,13 +186,13 @@ async def check_user_issues(
                         await send_safe(client, issue, user_cfg, extra_room, "new")
                 sent[iid] = {
                     "notified_at": now.isoformat(),
-                    "status": STATUS_NEW,
+                    "status": CATALOGS.status_name(issue.status.id, STATUS_NEW),
                     "group_last_notified_at": now.isoformat(),
                 }
                 changed_sent.add(iid)
 
             # ═══ 3. ПЕРЕДАНО В РАБОТУ.РВ ═══
-            elif issue.status.name == STATUS_RV and iid not in sent:
+            elif _is_status_rv(issue) and iid not in sent:
                 if should_notify(user_cfg, "new"):
                     await send_safe(client, issue, user_cfg, room, "new")
                     for personal_room in _group_member_rooms(user_cfg):
@@ -183,35 +205,36 @@ async def check_user_issues(
                         await send_safe(client, issue, user_cfg, extra_room, "new")
                 sent[iid] = {
                     "notified_at": now.isoformat(),
-                    "status": STATUS_RV,
+                    "status": CATALOGS.status_name(issue.status.id, STATUS_RV),
                     "group_last_notified_at": now.isoformat(),
                 }
                 changed_sent.add(iid)
-            elif issue.status.name in (STATUS_NEW, STATUS_RV) and iid in sent:
-                group_room = _group_room(user_cfg)
-                if group_room:
-                    last_group = sent.get(iid, {}).get("group_last_notified_at")
-                    if last_group:
-                        elapsed_group = (
-                            now - ensure_tz(datetime.fromisoformat(last_group))
-                        ).total_seconds()
-                    else:
-                        elapsed_group = GROUP_REPEAT_SECONDS + 1
-                    if elapsed_group >= GROUP_REPEAT_SECONDS and should_notify(
-                        _cfg_for_room(user_cfg, group_room), "new"
-                    ):
-                        await send_safe(client, issue, user_cfg, group_room, "new")
-                        sent[iid]["group_last_notified_at"] = now.isoformat()
-                        changed_sent.add(iid)
+            elif _is_status_new(issue) or _is_status_rv(issue):
+                if iid in sent:
+                    group_room = _group_room(user_cfg)
+                    if group_room:
+                        last_group = sent.get(iid, {}).get("group_last_notified_at")
+                        if last_group:
+                            elapsed_group = (
+                                now - ensure_tz(datetime.fromisoformat(last_group))
+                            ).total_seconds()
+                        else:
+                            elapsed_group = GROUP_REPEAT_SECONDS + 1
+                        if elapsed_group >= GROUP_REPEAT_SECONDS and should_notify(
+                            _cfg_for_room(user_cfg, group_room), "new"
+                        ):
+                            await send_safe(client, issue, user_cfg, group_room, "new")
+                            sent[iid]["group_last_notified_at"] = now.isoformat()
+                            changed_sent.add(iid)
 
             # ═══ 4. ИНФОРМАЦИЯ ПРЕДОСТАВЛЕНА ═══
-            elif issue.status.name == STATUS_INFO_PROVIDED:
+            elif _is_status_info_provided(issue):
                 if iid not in sent:
                     if should_notify(user_cfg, "info"):
                         await send_safe(client, issue, user_cfg, room, "info")
                     sent[iid] = {
                         "notified_at": now.isoformat(),
-                        "status": STATUS_INFO_PROVIDED,
+                        "status": CATALOGS.status_name(issue.status.id, STATUS_INFO_PROVIDED),
                     }
                     changed_sent.add(iid)
                 else:
@@ -234,12 +257,12 @@ async def check_user_issues(
                             changed_reminders.add(iid)
 
             # ═══ 5. ОТКРЫТО ПОВТОРНО ═══
-            elif issue.status.name == STATUS_REOPENED and iid not in sent:
+            elif _is_status_reopened(issue) and iid not in sent:
                 if should_notify(user_cfg, "reopened"):
                     await send_safe(client, issue, user_cfg, room, "reopened")
                 sent[iid] = {
                     "notified_at": now.isoformat(),
-                    "status": STATUS_REOPENED,
+                    "status": CATALOGS.status_name(issue.status.id, STATUS_REOPENED),
                 }
                 changed_sent.add(iid)
 
@@ -285,6 +308,7 @@ async def check_user_issues(
 
                 if max_id > journals.get(iid, {}).get("last_journal_id", 0):
                     journals[iid] = {"last_journal_id": max_id}
+                    changed_journals.add(iid)
                     changed_journals.add(iid)
             else:
                 if max_id > journals.get(iid, {}).get("last_journal_id", 0):

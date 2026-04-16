@@ -5,12 +5,12 @@
 в текущий момент времени (can_notify).
 
 Вызывается из bot.send_safe: DND, рабочие часы и дни; приоритет
-«Аварийный» (см. PRIORITY_EMERGENCY в config) пробивает ограничения.
+«Аварийный» пробивает ограничения (определяется через каталоги).
 """
 
 from datetime import time
 
-from bot.logic import PRIORITY_EMERGENCY
+from bot.config_state import CATALOGS
 from utils import now_tz
 
 # ═══════════════════════════════════════════════════════════════
@@ -83,7 +83,7 @@ def can_notify(user_cfg: dict, priority: str = "", dt=None) -> bool:
     Аварийный приоритет пробивает DND и выходные.
     """
     # Аварийный — всегда
-    if priority == PRIORITY_EMERGENCY:
+    if CATALOGS and CATALOGS.is_emergency(priority_name=priority):
         return True
 
     # Ручной DND

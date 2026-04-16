@@ -348,10 +348,19 @@ def detect_new_journals(
 # ═══════════════════════════════════════════════════════════════════════════
 
 
-def resolve_field_value(field_name: str, value: Any) -> str:
+def resolve_field_value(field_name: str, value: Any, catalogs=None) -> str:
     """Переводит ID в человекочитаемое имя для известных полей."""
     if value is None or value == "":
         return "—"
+    
+    # Если переданы каталоги, используем их
+    if catalogs is not None:
+        if field_name == "status_id":
+            return catalogs.status_name(int(value), default=str(value))
+        elif field_name == "priority_id":
+            return catalogs.priority_name(int(value), default=str(value))
+    
+    # Fallback на старые словари (если каталоги не загружены)
     resolver = ID_FIELD_RESOLVERS.get(field_name)
     if resolver:
         return resolver.get(str(value), str(value))

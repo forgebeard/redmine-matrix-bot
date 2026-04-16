@@ -280,7 +280,8 @@ async def send_matrix_message(
     extra_text: str = "",
 ) -> None:
     """Формирует и отправляет HTML-сообщение в Matrix через Jinja2-шаблон."""
-    from bot.logic import NOTIFICATION_TYPES, get_version_name, plural_days
+    from bot.config_state import CATALOGS
+    from bot.logic import get_version_name, plural_days
 
     global _notification_template
     if _notification_template is None:
@@ -298,7 +299,12 @@ async def send_matrix_message(
     resolved_room = await _resolve_room_id(client, room_id)
 
     issue_url = f"{REDMINE_URL}/issues/{issue.id}"
-    emoji, title = NOTIFICATION_TYPES.get(notification_type, ("🔔", "Обратите внимание"))
+    
+    # Берём emoji и title из каталогов, fallback на дефолт
+    if CATALOGS:
+        emoji, title = CATALOGS.notification_emoji_label(notification_type)
+    else:
+        emoji, title = "🔔", "Обратите внимание"
 
     overdue_text = ""
     if notification_type == "overdue" and issue.due_date:
