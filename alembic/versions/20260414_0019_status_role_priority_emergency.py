@@ -7,6 +7,7 @@ Create Date: 2026-04-14
 """
 
 import sqlalchemy as sa
+
 from alembic import op
 
 revision: str = "0019_status_role_priority_emergency"

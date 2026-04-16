@@ -61,7 +61,7 @@ def reset_dm_failed() -> None:
     _dm_failed.clear()
 
 
-async def prewarm_dm_rooms(client: "AsyncClient", mxids: list[str]) -> None:
+async def prewarm_dm_rooms(client: AsyncClient, mxids: list[str]) -> None:
     """Предварительное создание/поиск DM-комнат для списка MXID.
 
     Вызывается один раз при старте бота, после первого sync.
@@ -120,7 +120,7 @@ async def prewarm_dm_rooms(client: "AsyncClient", mxids: list[str]) -> None:
                 "✅ DM создан (%d/%d): %s → %s",
                 i + 1, len(need_create), target_mxid, room_id,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning("⏱ Pre-warm DM timeout: %s (пропуск)", target_mxid)
             failed_count += 1
         except Exception as e:
@@ -159,7 +159,7 @@ async def prewarm_dm_rooms(client: "AsyncClient", mxids: list[str]) -> None:
     _dm_failed.clear()
 
 
-def _find_existing_dm(client: "AsyncClient", target_mxid: str, bot_mxid: str) -> str | None:
+def _find_existing_dm(client: AsyncClient, target_mxid: str, bot_mxid: str) -> str | None:
     """Ищет существующую DM-комнату среди загруженных комнат. Не делает API-вызовов."""
     for r_id, room_obj in client.rooms.items():
         members = set()
@@ -173,7 +173,7 @@ def _find_existing_dm(client: "AsyncClient", target_mxid: str, bot_mxid: str) ->
     return None
 
 
-async def _create_dm(client: "AsyncClient", target_mxid: str) -> str:
+async def _create_dm(client: AsyncClient, target_mxid: str) -> str:
     """Создаёт DM-комнату. Бросает исключение при ошибке."""
     from nio import RoomCreateError, RoomCreateResponse
 
@@ -210,7 +210,7 @@ async def _create_dm(client: "AsyncClient", target_mxid: str) -> str:
 
     raise RuntimeError(f"Не удалось создать DM с {target_mxid} после {max_attempts} попыток")
 
-async def _resolve_room_id(client: "AsyncClient", room_or_mxid: str) -> str:
+async def _resolve_room_id(client: AsyncClient, room_or_mxid: str) -> str:
     """Если room_or_mxid — MXID (@user:server), находит или создаёт DM.
 
     Если это уже room_id (!xxx:server), возвращает как есть.
@@ -259,7 +259,7 @@ async def _resolve_room_id(client: "AsyncClient", room_or_mxid: str) -> str:
         logger.info("✅ DM создан: %s → %s", target_mxid, new_room_id)
         _mxid_to_room_cache[target_mxid] = new_room_id
         return new_room_id
-    except asyncio.TimeoutError:
+    except TimeoutError:
         _dm_failed.add(target_mxid)
         raise RuntimeError(
             f"Таймаут создания DM с {target_mxid} ({DM_CREATE_TIMEOUT}с)"
@@ -268,19 +268,19 @@ async def _resolve_room_id(client: "AsyncClient", room_or_mxid: str) -> str:
         _dm_failed.add(target_mxid)
         raise
 
-async def resolve_room(client: "AsyncClient", room_or_mxid: str) -> str:
+async def resolve_room(client: AsyncClient, room_or_mxid: str) -> str:
     """Публичный хелпер: резолвит MXID → room_id через кеш. Для использования вне sender."""
     return await _resolve_room_id(client, room_or_mxid)
 
 async def send_matrix_message(
-    client: "AsyncClient",
-    issue: "Issue",
+    client: AsyncClient,
+    issue: Issue,
     room_id: str,
     notification_type: str,
     extra_text: str = "",
 ) -> None:
     """Формирует и отправляет HTML-сообщение в Matrix через Jinja2-шаблон."""
-    from bot.config_state import CATALOGS, get_version_name, plural_days
+    from bot.config_state import get_version_name, plural_days
 
     global _notification_template
     if _notification_template is None:
@@ -338,8 +338,8 @@ async def send_matrix_message(
 
 
 async def send_safe(
-    client: "AsyncClient",
-    issue: "Issue",
+    client: AsyncClient,
+    issue: Issue,
     user_cfg: dict,
     room_id: str,
     notification_type: str,

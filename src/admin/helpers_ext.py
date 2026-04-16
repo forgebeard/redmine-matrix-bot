@@ -349,6 +349,7 @@ async def _load_catalogs(session: AsyncSession) -> tuple[list[dict[str, str]], l
 async def _load_statuses_catalog(session: AsyncSession) -> list[dict[str, str]]:
     """Загружает активные статусы из таблицы RedmineStatus."""
     from sqlalchemy import select
+
     from database.models import RedmineStatus
 
     result = await session.execute(
@@ -371,6 +372,7 @@ async def _load_statuses_catalog(session: AsyncSession) -> list[dict[str, str]]:
 async def _load_versions_catalog(session: AsyncSession) -> list[dict[str, str]]:
     """Загружает активные версии из таблицы RedmineVersion."""
     from sqlalchemy import select
+
     from database.models import RedmineVersion
 
     result = await session.execute(
@@ -393,6 +395,7 @@ async def _load_versions_catalog(session: AsyncSession) -> list[dict[str, str]]:
 async def _load_priorities_catalog(session: AsyncSession) -> list[dict[str, str]]:
     """Загружает активные приоритеты из таблицы RedminePriority."""
     from sqlalchemy import select
+
     from database.models import RedminePriority
 
     result = await session.execute(

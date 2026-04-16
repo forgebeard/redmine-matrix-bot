@@ -6,8 +6,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from user_matcher import (
     Match,
     extract_matrix_localpart,
@@ -21,7 +19,6 @@ from user_matcher import (
     transliterate,
     transliterate_variants,
 )
-
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Транслитерация

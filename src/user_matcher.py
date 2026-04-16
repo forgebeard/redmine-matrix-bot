@@ -729,16 +729,16 @@ async def _search_and_match(
     translit_searches = [translit_name]
     if translit_rev != translit_name:
         translit_searches.append(translit_rev)
-    
+
     # Добавляем поиск по отдельным словам (транслит)
     for part in rm_name.split():
         t_part = transliterate(part)
         if len(t_part) >= 3 and t_part not in translit_searches:
             translit_searches.append(t_part)
-    
+
     _sys.stderr.write(f"[MATCH-SEARCH] '{rm_name}': falling back to translit searches: {translit_searches}\n")
     _sys.stderr.flush()
-    
+
     for t_name in translit_searches:
         results_t = await search_matrix_user(client, homeserver, access_token, t_name)
         _sys.stderr.write(f"[MATCH-SEARCH]   translit '{t_name}' got {len(results_t)} results\n")

@@ -5,15 +5,16 @@ Revises: 20260408_0017_reference_data
 Create Date: 2026-04-13 12:00:00.000000
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 import sqlalchemy as sa
+
 from alembic import op
 
 revision: str = "0018_pending_notifications_dlq"
 down_revision: str | None = "0017_reference_data"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:

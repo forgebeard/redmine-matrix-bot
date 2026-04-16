@@ -7,12 +7,13 @@ check_user_issues — ядро бота: загрузка из Redmine, дете
 from __future__ import annotations
 
 import logging
-from bot.async_utils import run_in_thread
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from redminelib.exceptions import AuthError, BaseRedmineError, ForbiddenError
+
+from bot.async_utils import run_in_thread
 
 if TYPE_CHECKING:
     from nio import AsyncClient
@@ -30,7 +31,7 @@ def _redmine_ts(dt: datetime) -> str:
     Redmine отвергает offset-формат (+03:00).
     Приводим к UTC и отдаём «YYYY-MM-DDTHH:MM:SSZ».
     """
-    return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return dt.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 async def check_user_issues(
@@ -50,7 +51,7 @@ async def check_user_issues(
     Инкрементальная загрузка: после первого цикла запрашиваем только
     задачи, обновлённые с момента последнего успешного цикла.
     """
-   
+
     from bot.sender import send_safe
     from database.state_repo import load_user_issue_state
 
