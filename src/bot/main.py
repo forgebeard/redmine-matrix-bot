@@ -165,6 +165,7 @@ def runtime_status_file() -> Path:
 # ── Глобальные переменные (заполняются в main()) ────────────────────────────
 
 USERS: list[dict] = []
+GROUPS: list[dict] = []
 STATUS_ROOM_MAP: dict[str, str] = {}
 VERSION_ROOM_MAP: dict[str, str] = {}
 
@@ -176,6 +177,7 @@ REDMINE_KEY: str = ""
 
 # Время последней успешной проверки для каждого пользователя
 _last_check_time: dict[int, datetime] = {}
+_last_unassigned_new_check_time: dict[str, datetime] = {}
 
 # ── Логирование ──────────────────────────────────────────────────────────────
 
@@ -248,6 +250,7 @@ def _log_redmine_list_error(uid: int, err: Exception, where: str) -> None:
 async def main() -> None:
     global \
         USERS, \
+        GROUPS, \
         STATUS_ROOM_MAP, \
         VERSION_ROOM_MAP, \
         HOMESERVER, \
@@ -345,12 +348,15 @@ async def main() -> None:
     try:
         from database.load_config import fetch_runtime_config
 
-        u, sm, vm = await fetch_runtime_config()
+        u, sm, vm, g = await fetch_runtime_config()
     except Exception as e:
         logger.error("❌ Не удалось загрузить конфиг из БД: %s", e, exc_info=True)
         return
 
     # Синхронизируем в config_state и main
+    from bot.config_state import (
+        GROUPS as _SG,
+    )
     from bot.config_state import (
         STATUS_ROOM_MAP as _SR,
     )
@@ -362,15 +368,28 @@ async def main() -> None:
     )
 
     USERS = u
+    GROUPS = g
     STATUS_ROOM_MAP = sm or {}
     VERSION_ROOM_MAP = vm or {}
     _SU[:] = USERS
+    _SG[:] = GROUPS
     _SR.clear()
     _SR.update(STATUS_ROOM_MAP)
     _SV.clear()
     _SV.update(VERSION_ROOM_MAP)
 
-    logger.info("Конфиг из БД обновлён, пользователей: %s", len(USERS))
+    logger.info("Конфиг из БД обновлён, пользователей: %s, групп: %s", len(USERS), len(GROUPS))
+    group_rooms = sorted(
+        {
+            (g.get("room") or "").strip()
+            for g in GROUPS
+            if isinstance(g, dict) and (g.get("room") or "").strip()
+        }
+    )
+    if group_rooms:
+        logger.info("📣 Групповые комнаты из БД: %s", ", ".join(group_rooms))
+    else:
+        logger.info("📣 Групповые комнаты из БД: не заданы")
         # ── Загрузка cycle_settings (интервалы, таймзона из БД) ──────────────
     from database.load_config import fetch_cycle_settings
 
@@ -486,7 +505,8 @@ async def main() -> None:
         if room:
             all_mxids.append(room)
         # group_room тоже может быть MXID
-        gr = (u_cfg.get("group_room") or "").strip()
+    for g_cfg in GROUPS:
+        gr = (g_cfg.get("room") or "").strip()
         if gr:
             all_mxids.append(gr)
 
@@ -508,6 +528,7 @@ async def main() -> None:
     from bot.processor import check_user_issues
     from bot.scheduler import (
         check_all_users,
+        check_unassigned_new_issues,
         cleanup_state_files,
         daily_report,
     )
@@ -551,6 +572,23 @@ async def main() -> None:
             "check_user_issues_fn": check_user_issues,
             "last_check_time": _last_check_time,
             "max_concurrent": 5,
+        },
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=30,
+        next_run_time=datetime.now(tz=BOT_TZ),
+    )
+
+    scheduler.add_job(
+        check_unassigned_new_issues,
+        "interval",
+        seconds=CHECK_INTERVAL,
+        args=[client, redmine],
+        kwargs={
+            "now_tz": now_tz,
+            "last_check_time": _last_unassigned_new_check_time,
+            "bot_instance_id": BOT_INSTANCE_ID_UUID,
+            "bot_lease_ttl": BOT_LEASE_TTL_SECONDS,
         },
         max_instances=1,
         coalesce=True,

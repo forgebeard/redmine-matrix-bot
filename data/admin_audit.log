@@ -26,3 +26,12 @@
 15.04.2026 08:51:03 [AUDIT] ADMIN_CRUD entity=bot_user action=update actor=admin entity_id=67 details={"id": "67", "redmine_id": "910"}
 15.04.2026 08:51:25 [AUDIT] ADMIN_CRUD entity=bot_user action=update actor=admin entity_id=62 details={"id": "62", "redmine_id": "617"}
 15.04.2026 08:52:05 [AUDIT] ADMIN_CRUD entity=bot_user action=update actor=admin entity_id=85 details={"id": "85", "redmine_id": "2750"}
+17.04.2026 12:11:50 [AUDIT] ADMIN_CRUD entity=group action=update actor=admin entity_id=5 details={"id": "5", "name": "ТП_РЕД_ВИРТ"}
+17.04.2026 12:12:25 [AUDIT] ADMIN_CRUD entity=group action=update actor=admin entity_id=5 details={"id": "5", "name": "ТП_РЕД_ВИРТ"}
+17.04.2026 12:31:50 [AUDIT] ADMIN_CRUD entity=group action=update actor=admin entity_id=5 details={"id": "5", "name": "ТП_РЕД_ВИРТ"}
+17.04.2026 12:33:00 [AUDIT] ADMIN_CRUD entity=bot_user action=update actor=admin entity_id=76 details={"id": "76", "redmine_id": "1876"}
+17.04.2026 12:33:06 [AUDIT] ADMIN_CRUD entity=bot_user action=update actor=admin entity_id=76 details={"id": "76", "redmine_id": "1876"}
+17.04.2026 12:45:40 [AUDIT] ADMIN_CRUD entity=group action=update actor=admin entity_id=5 details={"id": "5", "name": "ТП_РЕД_ВИРТ"}
+17.04.2026 12:52:48 [AUDIT] ADMIN_CRUD entity=group action=update actor=admin entity_id=5 details={"id": "5", "name": "ТП_РЕД_ВИРТ"}
+17.04.2026 12:52:48 [AUDIT] ADMIN_CRUD entity=group action=update actor=admin entity_id=5 details={"id": "5", "name": "ТП_РЕД_ВИРТ"}
+17.04.2026 13:31:03 [AUDIT] ADMIN_CRUD entity=bot_user action=bulk_delete actor=admin details={"count": "58", "ids": "[omitted]"}

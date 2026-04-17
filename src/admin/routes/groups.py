@@ -32,6 +32,14 @@ def _validate_work_time(val: str, label: str) -> str:
     return val
 
 
+def _pick_form_values(primary_values: list[str] | None, fallback_json: str) -> list[str]:
+    """Use checkbox list first, fallback to hidden JSON list."""
+    selected = [str(v).strip() for v in (primary_values or []) if str(v).strip()]
+    if selected:
+        return selected
+    return _admin()._parse_json_string_list(fallback_json)
+
+
 def _admin() -> object:
     """Late import to avoid circular dependency with main.py."""
     import admin.main as _m
@@ -365,7 +373,8 @@ async def groups_create(
     if status_preset == "default":
         notify = [item["key"] for item in statuses_catalog if item.get("is_default")]
     elif status_preset == "custom":
-        notify = admin._normalize_notify(status_values, status_allowed)
+        selected_statuses = _pick_form_values(status_values, status_json)
+        notify = admin._normalize_notify(selected_statuses, status_allowed)
     else:
         notify = admin._parse_notify(status_json)
 
@@ -374,7 +383,8 @@ async def groups_create(
     if version_preset == "default":
         versions = [item["key"] for item in versions_catalog if item.get("is_default")]
     elif version_preset == "custom":
-        versions = admin._normalize_versions(version_values, version_catalog_keys)
+        selected_versions = _pick_form_values(version_values, version_json)
+        versions = admin._normalize_versions(selected_versions, version_catalog_keys)
     else:
         versions = admin._parse_json_string_list(version_json) or ["all"]
 
@@ -383,7 +393,8 @@ async def groups_create(
     if priority_preset == "default":
         priorities = [item["key"] for item in priorities_catalog if item.get("is_default")]
     elif priority_preset == "custom":
-        priorities = admin._normalize_versions(priority_values, priority_catalog_keys)
+        selected_priorities = _pick_form_values(priority_values, priority_json)
+        priorities = admin._normalize_versions(selected_priorities, priority_catalog_keys)
     else:
         priorities = admin._parse_json_string_list(priority_json) or ["all"]
     if work_hours_from and work_hours_to:
@@ -492,7 +503,8 @@ async def groups_update(
     if status_preset == "default":
         notify = [item["key"] for item in statuses_catalog if item.get("is_default")]
     elif status_preset == "custom":
-        notify = admin._normalize_notify(status_values, status_allowed)
+        selected_statuses = _pick_form_values(status_values, status_json)
+        notify = admin._normalize_notify(selected_statuses, status_allowed)
     else:
         notify = admin._parse_notify(status_json)
 
@@ -501,7 +513,8 @@ async def groups_update(
     if version_preset == "default":
         versions = [item["key"] for item in versions_catalog if item.get("is_default")]
     elif version_preset == "custom":
-        versions = admin._normalize_versions(version_values, version_catalog_keys)
+        selected_versions = _pick_form_values(version_values, version_json)
+        versions = admin._normalize_versions(selected_versions, version_catalog_keys)
     else:
         versions = admin._parse_json_string_list(version_json) or ["all"]
 
@@ -510,7 +523,8 @@ async def groups_update(
     if priority_preset == "default":
         priorities = [item["key"] for item in priorities_catalog if item.get("is_default")]
     elif priority_preset == "custom":
-        priorities = admin._normalize_versions(priority_values, priority_catalog_keys)
+        selected_priorities = _pick_form_values(priority_values, priority_json)
+        priorities = admin._normalize_versions(selected_priorities, priority_catalog_keys)
     else:
         priorities = admin._parse_json_string_list(priority_json) or ["all"]
     old_room = (row.room_id or "").strip()

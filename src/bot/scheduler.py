@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from redminelib import Redmine
 
 logger = logging.getLogger("redmine_bot")
+GLOBAL_UNASSIGNED_NEW_STATE_UID = 0
 
 
 def _safe_html_or_empty(value: str) -> str:
@@ -173,6 +174,184 @@ async def check_all_users(
             int(elapsed),
             check_interval,
         )
+
+
+def _issue_is_unassigned(issue: Any) -> bool:
+    try:
+        assignee = getattr(issue, "assigned_to", None)
+    except Exception:
+        assignee = None
+    if assignee is None:
+        return True
+    try:
+        assignee_id = getattr(assignee, "id", None)
+        return assignee_id in (None, "", 0)
+    except Exception:
+        return False
+
+
+def _redmine_ts(dt: datetime) -> str:
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+async def check_unassigned_new_issues(
+    client: AsyncClient,
+    redmine: Redmine,
+    *,
+    now_tz: Callable[[], datetime],
+    last_check_time: dict[str, datetime],
+    bot_instance_id,
+    bot_lease_ttl: int,
+) -> None:
+    """Checks NEW unassigned issues and routes by status/version/priority."""
+    from bot.async_utils import run_in_thread
+    from bot.config_state import CATALOGS, GROUPS, USERS
+    from bot.logic import STATUS_NEW, issue_matches_cfg, should_notify
+    from bot.sender import send_safe
+    from database.session import get_session_factory
+    from database.state_repo import (
+        load_user_issue_state,
+        try_acquire_user_lease,
+        upsert_user_issue_state,
+    )
+    from preferences import can_notify
+
+    state_key = "unassigned_new"
+    prev_check = last_check_time.get(state_key)
+    warm_start_from = datetime.now(UTC) - timedelta(minutes=15)
+    status_new_id = CATALOGS.status_name_to_id.get(STATUS_NEW) if CATALOGS else None
+    params: dict[str, Any] = {"assigned_to_id": "!*"}
+    if status_new_id is not None:
+        params["status_id"] = str(status_new_id)
+    else:
+        params["status_id"] = "open"
+    updated_from = prev_check or warm_start_from
+    params["updated_on"] = f">={_redmine_ts(updated_from)}"
+
+    logger.info("🧭 Unassigned NEW: старт проверки")
+    try:
+        issues = await run_in_thread(lambda: list(redmine.issue.filter(**params)))
+    except Exception as primary_err:
+        logger.warning(
+            "⚠ check_unassigned_new: primary filter failed (%s), fallback to open issues scan",
+            primary_err,
+        )
+        fallback_params: dict[str, Any] = {
+            "status_id": "open",
+            "updated_on": f">={_redmine_ts(updated_from)}",
+        }
+        try:
+            issues = await run_in_thread(lambda: list(redmine.issue.filter(**fallback_params)))
+        except Exception as fallback_err:
+            logger.error(
+                "❌ check_unassigned_new: Redmine fallback failed: %s",
+                fallback_err,
+                exc_info=True,
+            )
+            return
+
+    candidate_issues = [
+        issue
+        for issue in issues
+        if getattr(getattr(issue, "status", None), "name", "") == STATUS_NEW
+        and _issue_is_unassigned(issue)
+    ]
+    if prev_check:
+        logger.info(
+            "🧭 Unassigned NEW: %d задач (обновлено с %s)",
+            len(candidate_issues),
+            prev_check.strftime("%H:%M:%S"),
+        )
+    else:
+        logger.info(
+            "🧭 Unassigned NEW: %d задач (тёплый старт с %s)",
+            len(candidate_issues),
+            warm_start_from.strftime("%H:%M:%S"),
+        )
+
+    session_factory = get_session_factory()
+    lease_until = datetime.now(UTC) + timedelta(seconds=bot_lease_ttl)
+    now = now_tz()
+
+    async with session_factory() as session:
+        acquired = await try_acquire_user_lease(
+            session,
+            GLOBAL_UNASSIGNED_NEW_STATE_UID,
+            lease_owner_id=bot_instance_id,
+            lease_until=lease_until,
+        )
+        if not acquired:
+            return
+        await session.commit()
+
+        sent, reminders, overdue, journals = await load_user_issue_state(
+            session, GLOBAL_UNASSIGNED_NEW_STATE_UID
+        )
+        changed_sent: set[str] = set()
+
+        for issue in candidate_issues:
+            iid = str(issue.id)
+            if iid in sent:
+                continue
+
+            recipients: list[tuple[dict[str, Any], str]] = []
+            matched_group_rooms = 0
+            for group_cfg in GROUPS:
+                room = (group_cfg.get("room") or "").strip()
+                if not room or not should_notify(group_cfg, "new"):
+                    continue
+                if not issue_matches_cfg(issue, group_cfg):
+                    continue
+                recipients.append((group_cfg, room))
+                matched_group_rooms += 1
+
+            logger.info(
+                "🧭 Unassigned NEW #%s: matched groups=%d",
+                issue.id,
+                matched_group_rooms,
+            )
+
+            sent_rooms: set[str] = set()
+            for cfg, room in recipients:
+                if room in sent_rooms:
+                    continue
+                try:
+                    if can_notify(cfg, priority=""):
+                        await send_safe(
+                            client,
+                            issue,
+                            cfg,
+                            room,
+                            "new",
+                            db_session=session,
+                        )
+                        sent_rooms.add(room)
+                except Exception as e:
+                    logger.error(
+                        "❌ Unassigned NEW send failed #%s → %s: %s",
+                        issue.id,
+                        room[:20],
+                        e,
+                    )
+
+            sent[iid] = {"notified_at": now.isoformat(), "status": STATUS_NEW}
+            changed_sent.add(iid)
+
+        await upsert_user_issue_state(
+            session,
+            GLOBAL_UNASSIGNED_NEW_STATE_UID,
+            changed_sent,
+            sent,
+            reminders,
+            overdue,
+            journals,
+        )
+        await session.commit()
+
+    last_check_time[state_key] = datetime.now(UTC)
+    logger.info("🧭 Unassigned NEW: завершено, новых отправок: %d", len(changed_sent))
 
 
 async def daily_report(

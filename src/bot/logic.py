@@ -115,7 +115,15 @@ def should_notify(user_cfg: dict[str, Any], notification_type: str) -> bool:
     "all" — подписан на всё.
     """
     notify_list = user_cfg.get("notify", ["all"])
-    return "all" in notify_list or notification_type in notify_list
+    norm = {str(v).strip().lower() for v in (notify_list or []) if str(v).strip()}
+    if not norm or "all" in norm:
+        return True
+    known_types = {k.lower() for k in NOTIFICATION_TYPES}
+    # Backward-compat: when notify stores status filters (ids/names), do not
+    # block delivery by notification kind here; filtering happens in issue_matches_cfg.
+    if any(v not in known_types for v in norm):
+        return True
+    return notification_type.lower() in norm
 
 
 def _issue_priority_name(issue) -> str:
@@ -301,8 +309,17 @@ def issue_matches_cfg(issue: _IssueLike, user_cfg: dict[str, Any]) -> bool:
     if priority_name:
         priority_candidates.add(priority_name)
 
+    raw_notify = user_cfg.get("notify", ["all"])
+    notify_norm = {str(v).strip().lower() for v in (raw_notify or []) if str(v).strip()}
+    known_types = {k.lower() for k in NOTIFICATION_TYPES}
+    # Legacy mode: notify list contains notification kinds, not statuses.
+    # In this case skip status attribute matching.
+    status_match = True
+    if notify_norm and "all" not in notify_norm and any(v not in known_types for v in notify_norm):
+        status_match = _matches_filter(raw_notify, status_candidates)
+
     return (
-        _matches_filter(user_cfg.get("notify", ["all"]), status_candidates)
+        status_match
         and _matches_filter(user_cfg.get("versions", ["all"]), version_candidates)
         and _matches_filter(user_cfg.get("priorities", ["all"]), priority_candidates)
     )

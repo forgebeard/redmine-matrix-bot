@@ -57,6 +57,56 @@ def init_template(root) -> None:
     _notification_template = env.get_template("notification.html")
 
 
+def _render_notification_templates(
+    *,
+    notification_type: str,
+    issue,
+    issue_url: str,
+    version: str | None,
+    due_date: str | None,
+    overdue_text: str,
+    title: str,
+    emoji: str,
+    extra_text: str,
+    fallback_html: str,
+    fallback_plain: str,
+) -> tuple[str, str]:
+    from bot.config_state import CATALOGS
+
+    settings = CATALOGS.cycle_settings if CATALOGS is not None else {}
+    key_suffix = notification_type.upper()
+    html_tpl = (settings.get(f"NOTIFY_TEMPLATE_HTML_{key_suffix}") or "").strip()
+    plain_tpl = (settings.get(f"NOTIFY_TEMPLATE_PLAIN_{key_suffix}") or "").strip()
+
+    ctx = {
+        "issue_id": issue.id,
+        "issue_url": issue_url,
+        "subject": issue.subject,
+        "status": issue.status.name,
+        "priority": issue.priority.name,
+        "version": version or "",
+        "due_date": due_date or "",
+        "notification_type": notification_type,
+        "title": title,
+        "emoji": emoji,
+        "extra_text": extra_text or "",
+        "overdue_text": overdue_text or "",
+    }
+    html_body = fallback_html
+    plain_body = fallback_plain
+    if html_tpl:
+        try:
+            html_body = html_tpl.format(**ctx)
+        except Exception:
+            logger.warning("invalid_html_template_for_%s; fallback_default", notification_type)
+    if plain_tpl:
+        try:
+            plain_body = plain_tpl.format(**ctx)
+        except Exception:
+            logger.warning("invalid_plain_template_for_%s; fallback_default", notification_type)
+    return html_body, plain_body
+
+
 def reset_dm_failed() -> None:
     """Сброс списка неудачных DM (вызывается в начале каждого цикла)."""
     _dm_failed.clear()
@@ -335,6 +385,19 @@ async def send_matrix_message(
     )
 
     plain_body = f"{emoji} {title} #{issue.id}: {issue.subject} | Статус: {issue.status.name}"
+    html_body, plain_body = _render_notification_templates(
+        notification_type=notification_type,
+        issue=issue,
+        issue_url=issue_url,
+        version=version,
+        due_date=due_date,
+        overdue_text=overdue_text,
+        title=title,
+        emoji=emoji,
+        extra_text=extra_text,
+        fallback_html=html_body,
+        fallback_plain=plain_body,
+    )
 
     content = {
         "msgtype": "m.text",

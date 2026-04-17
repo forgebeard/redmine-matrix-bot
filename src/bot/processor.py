@@ -105,7 +105,7 @@ async def check_user_issues(
     today = now.date()
 
     # Импорт helpers из bot.logic
-    from bot.config_state import USERS, VERSION_ROOM_MAP
+    from bot.config_state import GROUPS, USERS, VERSION_ROOM_MAP
     from bot.logic import (
         STATUS_INFO_PROVIDED,
         STATUS_REOPENED,
@@ -113,6 +113,7 @@ async def check_user_issues(
         describe_journal,
         detect_new_journals,
         detect_status_change,
+        issue_matches_cfg,
         should_notify,
     )
     from bot.logic import (
@@ -131,6 +132,17 @@ async def check_user_issues(
 
         def _get_extra_rooms_for_new(issue, user_cfg: dict) -> set[str]:
             return _get_extra_rooms_for_new_raw(issue, user_cfg, VERSION_ROOM_MAP, USERS)
+
+        def _matched_global_group_rooms(issue_obj, source_user_cfg: dict) -> set[str]:
+            out: set[str] = set()
+            source_group_room = (source_user_cfg.get("group_room") or "").strip()
+            for g in GROUPS:
+                room_id = (g.get("room") or "").strip()
+                if not room_id or room_id == source_group_room:
+                    continue
+                if issue_matches_cfg(issue_obj, g):
+                    out.add(room_id)
+            return out
 
         try:
             # ═══ 1. СМЕНА СТАТУСА ═══
@@ -161,6 +173,7 @@ async def check_user_issues(
                             group_room and should_notify(_cfg_for_room(user_cfg, group_room), "new")
                         )
                         extra_rooms = _get_extra_rooms_for_new(issue, user_cfg)
+                        extra_rooms |= _matched_global_group_rooms(issue, user_cfg)
                         actions = build_first_notification_actions(
                             main_room=room,
                             notification_kind="new",
@@ -194,8 +207,12 @@ async def check_user_issues(
                     sent[iid]["group_last_notified_at"] = now.isoformat()
                 changed_sent.add(iid)
             elif iid in sent and sent.get(iid, {}).get("group_last_notified_at"):
+                group_rooms = set()
                 group_room = _group_room(user_cfg)
                 if group_room:
+                    group_rooms.add(group_room)
+                group_rooms |= _matched_global_group_rooms(issue, user_cfg)
+                if group_rooms:
                     last_group = sent.get(iid, {}).get("group_last_notified_at")
                     if last_group:
                         elapsed_group = (
@@ -203,10 +220,10 @@ async def check_user_issues(
                         ).total_seconds()
                     else:
                         elapsed_group = GROUP_REPEAT_SECONDS + 1
-                    if elapsed_group >= GROUP_REPEAT_SECONDS and should_notify(
-                        _cfg_for_room(user_cfg, group_room), "new"
-                    ):
-                        await send_safe(client, issue, user_cfg, group_room, "new")
+                    if elapsed_group >= GROUP_REPEAT_SECONDS:
+                        for gr in group_rooms:
+                            if should_notify(_cfg_for_room(user_cfg, gr), "new"):
+                                await send_safe(client, issue, user_cfg, gr, "new")
                         sent[iid]["group_last_notified_at"] = now.isoformat()
                         changed_sent.add(iid)
 

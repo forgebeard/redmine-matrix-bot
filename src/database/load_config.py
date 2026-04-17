@@ -77,9 +77,23 @@ def user_orm_to_cfg(
     return d
 
 
-async def fetch_runtime_config(session: AsyncSession | None = None) -> tuple[list, dict, dict]:
+def group_orm_to_cfg(row: SupportGroup) -> dict[str, Any]:
+    return {
+        "group_id": row.id,
+        "group_name": row.name,
+        "room": row.room_id,
+        "notify": row.notify if isinstance(row.notify, list) else ["all"],
+        "versions": row.versions if isinstance(row.versions, list) else ["all"],
+        "priorities": row.priorities if isinstance(row.priorities, list) else ["all"],
+        "work_hours": row.work_hours,
+        "work_days": row.work_days,
+        "dnd": bool(row.dnd),
+    }
+
+
+async def fetch_runtime_config(session: AsyncSession | None = None) -> tuple[list, dict, dict, list]:
     """
-    Возвращает (USERS, STATUS_ROOM_MAP, VERSION_ROOM_MAP).
+    Возвращает (USERS, STATUS_ROOM_MAP, VERSION_ROOM_MAP, GROUPS).
     """
     if session is None:
         factory = get_session_factory()
@@ -104,6 +118,7 @@ async def fetch_runtime_config(session: AsyncSession | None = None) -> tuple[lis
     users = [
         user_orm_to_cfg(u, groups_by_id, gv_by_group, uv_by_user) for u in r_users.scalars().all()
     ]
+    groups_cfg = [group_orm_to_cfg(g) for g in groups]
 
     r_st = await session.execute(select(StatusRoomRoute))
     status_map = {row.status_key: row.room_id for row in r_st.scalars().all()}
@@ -111,7 +126,7 @@ async def fetch_runtime_config(session: AsyncSession | None = None) -> tuple[lis
     r_ver = await session.execute(select(VersionRoomRoute))
     version_map = {row.version_key: row.room_id for row in r_ver.scalars().all()}
 
-    return users, status_map, version_map
+    return users, status_map, version_map, groups_cfg
 
 
 async def row_counts(session: AsyncSession | None = None) -> tuple[int, int, int]:

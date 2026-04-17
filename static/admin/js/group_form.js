@@ -29,8 +29,6 @@
       statusCheckboxes.forEach(function (cb) {
         cb.checked = cb.getAttribute('data-default') === 'true';
       });
-    } else {
-      statusCheckboxes.forEach(function (cb) { cb.checked = false; });
     }
     refreshSummary();
   }
@@ -77,8 +75,6 @@
     if (!current) return;
     if (current.value === 'default') {
       versionCheckboxes.forEach(function (cb) { cb.checked = cb.getAttribute('data-default') === 'true'; });
-    } else {
-      versionCheckboxes.forEach(function (cb) { cb.checked = false; });
     }
     refreshSummary();
   }
@@ -116,8 +112,6 @@
     if (!current) return;
     if (current.value === 'default') {
       priorityCheckboxes.forEach(function (cb) { cb.checked = cb.getAttribute('data-default') === 'true'; });
-    } else {
-      priorityCheckboxes.forEach(function (cb) { cb.checked = false; });
     }
     refreshSummary();
   }
@@ -217,6 +211,34 @@
     setSummary('summary_group_dnd', dndLabel());
   }
 
+  function syncHiddenSelections() {
+    var statusHidden = document.querySelector('input[name="status_json"]');
+    var versionHidden = document.querySelector('input[name="version_json"]');
+    var priorityHidden = document.querySelector('input[name="priority_json"]');
+
+    if (statusHidden) {
+      var statusValues = Array.from(document.querySelectorAll('input[name="status_values"]'))
+        .filter(function (el) { return el.checked; })
+        .map(function (el) { return String(el.value || '').trim(); })
+        .filter(Boolean);
+      statusHidden.value = JSON.stringify(statusValues);
+    }
+    if (versionHidden) {
+      var versionValues = Array.from(document.querySelectorAll('input[name="version_values"]'))
+        .filter(function (el) { return el.checked; })
+        .map(function (el) { return String(el.value || '').trim(); })
+        .filter(Boolean);
+      versionHidden.value = JSON.stringify(versionValues);
+    }
+    if (priorityHidden) {
+      var priorityValues = Array.from(document.querySelectorAll('input[name="priority_values"]'))
+        .filter(function (el) { return el.checked; })
+        .map(function (el) { return String(el.value || '').trim(); })
+        .filter(Boolean);
+      priorityHidden.value = JSON.stringify(priorityValues);
+    }
+  }
+
   /* --- Bind summary listeners --- */
   ['name', 'room_id', 'timezone_name', 'work_hours_from_group', 'work_hours_to_group', 'dnd_group'].forEach(function (id) {
     var el = document.getElementById(id);
@@ -228,9 +250,13 @@
 
   // ★ ДОБАВЛЕНО: priority_values и priority_preset в список слушателей
   Array.from(document.querySelectorAll('input[name="status_preset"], input[name="status_values"], input[name="version_values"], input[name="version_preset"], input[name="priority_values"], input[name="priority_preset"]')).forEach(function (el) {
-    el.addEventListener('change', refreshSummary);
+    el.addEventListener('change', function () {
+      syncHiddenSelections();
+      refreshSummary();
+    });
   });
 
+  syncHiddenSelections();
   refreshSummary();
 
   /* --- Кнопка «Отправить тестовое сообщение» --- */
@@ -283,6 +309,7 @@
   var form = document.querySelector('.form');
   if (form) {
     form.addEventListener('submit', function (e) {
+      syncHiddenSelections();
       var nameEl = document.getElementById('name');
       var roomEl = document.getElementById('room_id');
       var errors = [];

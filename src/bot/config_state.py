@@ -9,6 +9,9 @@ from __future__ import annotations
 # Пользователи бота (загружаются из БД)
 USERS: list[dict] = []
 
+# Группы бота (загружаются из БД)
+GROUPS: list[dict] = []
+
 # Маршрутизация: статус → Matrix room
 STATUS_ROOM_MAP: dict[str, str] = {}
 

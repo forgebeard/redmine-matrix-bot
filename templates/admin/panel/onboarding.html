@@ -334,6 +334,62 @@
           ></textarea>
         </div>
       </section>
+
+      <section class="service-bubble">
+        <div class="card-title">Шаблоны событийных уведомлений</div>
+        <p class="muted">
+          Плейсхолдеры: {issue_id}, {issue_url}, {subject}, {status}, {priority}, {version}, {due_date}, {notification_type}, {title}, {emoji}, {extra_text}.
+        </p>
+
+        <div class="field">
+          <label for="nt_html_new">Новая задача — HTML</label>
+          <textarea id="nt_html_new" rows="4" placeholder="<b>{emoji} {title}</b><br/>#{issue_id}: {subject}"></textarea>
+          <label for="nt_plain_new">Новая задача — Text</label>
+          <textarea id="nt_plain_new" rows="2" placeholder="{emoji} {title} #{issue_id}: {subject}"></textarea>
+        </div>
+
+        <div class="field">
+          <label for="nt_html_reopened">Переоткрыта — HTML</label>
+          <textarea id="nt_html_reopened" rows="3"></textarea>
+          <label for="nt_plain_reopened">Переоткрыта — Text</label>
+          <textarea id="nt_plain_reopened" rows="2"></textarea>
+        </div>
+
+        <div class="field">
+          <label for="nt_html_info">Информация предоставлена — HTML</label>
+          <textarea id="nt_html_info" rows="3"></textarea>
+          <label for="nt_plain_info">Информация предоставлена — Text</label>
+          <textarea id="nt_plain_info" rows="2"></textarea>
+        </div>
+
+        <div class="field">
+          <label for="nt_html_reminder">Напоминание — HTML</label>
+          <textarea id="nt_html_reminder" rows="3"></textarea>
+          <label for="nt_plain_reminder">Напоминание — Text</label>
+          <textarea id="nt_plain_reminder" rows="2"></textarea>
+        </div>
+
+        <div class="field">
+          <label for="nt_html_overdue">Просрочка — HTML</label>
+          <textarea id="nt_html_overdue" rows="3"></textarea>
+          <label for="nt_plain_overdue">Просрочка — Text</label>
+          <textarea id="nt_plain_overdue" rows="2"></textarea>
+        </div>
+
+        <div class="field">
+          <label for="nt_html_issue_updated">Обновление задачи — HTML</label>
+          <textarea id="nt_html_issue_updated" rows="3"></textarea>
+          <label for="nt_plain_issue_updated">Обновление задачи — Text</label>
+          <textarea id="nt_plain_issue_updated" rows="2"></textarea>
+        </div>
+
+        <div class="field">
+          <label for="nt_html_status_change">Смена статуса — HTML</label>
+          <textarea id="nt_html_status_change" rows="3"></textarea>
+          <label for="nt_plain_status_change">Смена статуса — Text</label>
+          <textarea id="nt_plain_status_change" rows="2"></textarea>
+        </div>
+      </section>
     </div>
 
   </form>

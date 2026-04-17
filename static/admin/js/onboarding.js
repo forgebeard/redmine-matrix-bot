@@ -176,6 +176,22 @@
     var htmlTpl = document.getElementById("daily_report_html_template");
     var plainTpl = document.getElementById("daily_report_plain_template");
     if (!saveBtn || !status || !enabled || !hour || !minute || !htmlTpl || !plainTpl) return;
+    var notificationTypes = [
+      "new",
+      "reopened",
+      "info",
+      "reminder",
+      "overdue",
+      "issue_updated",
+      "status_change"
+    ];
+
+    function getEventTemplateInputs(kind) {
+      return {
+        html: document.getElementById("nt_html_" + kind),
+        plain: document.getElementById("nt_plain_" + kind)
+      };
+    }
 
     function csrfToken() {
       var csrfInput = form.querySelector('input[name="csrf_token"]');
@@ -210,6 +226,13 @@
         minute.value = normalizeInt(s.daily_report_minute, 0, 59, 0);
         htmlTpl.value = s.daily_report_html_template || "";
         plainTpl.value = s.daily_report_plain_template || "";
+        var templates = s.notification_templates || {};
+        notificationTypes.forEach(function (kind) {
+          var pair = getEventTemplateInputs(kind);
+          var tpl = templates[kind] || {};
+          if (pair.html) pair.html.value = tpl.html || "";
+          if (pair.plain) pair.plain.value = tpl.plain || "";
+        });
         status.textContent = "";
       }).catch(function () {
         status.textContent = "Не удалось загрузить настройки уведомлений.";
@@ -227,6 +250,15 @@
       fd.append("daily_report_minute", String(normalizeInt(minute.value, 0, 59, 0)));
       fd.append("daily_report_html_template", htmlTpl.value || "");
       fd.append("daily_report_plain_template", plainTpl.value || "");
+      var templatesPayload = {};
+      notificationTypes.forEach(function (kind) {
+        var pair = getEventTemplateInputs(kind);
+        templatesPayload[kind] = {
+          html: pair.html ? (pair.html.value || "") : "",
+          plain: pair.plain ? (pair.plain.value || "") : ""
+        };
+      });
+      fd.append("notification_templates_json", JSON.stringify(templatesPayload));
 
       fetch("/api/bot/content", {
         method: "POST",

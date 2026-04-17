@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
@@ -21,6 +22,15 @@ _KEYS = {
     "daily_report_html_template": "DAILY_REPORT_HTML_TEMPLATE",
     "daily_report_plain_template": "DAILY_REPORT_PLAIN_TEMPLATE",
 }
+_NOTIFICATION_TYPES = [
+    "new",
+    "reopened",
+    "info",
+    "reminder",
+    "overdue",
+    "issue_updated",
+    "status_change",
+]
 
 
 def _admin() -> object:
@@ -39,6 +49,14 @@ def _safe_hour(value: int) -> int:
 
 def _safe_minute(value: int) -> int:
     return max(0, min(59, int(value)))
+
+
+def _tpl_key_html(notification_type: str) -> str:
+    return f"NOTIFY_TEMPLATE_HTML_{notification_type.upper()}"
+
+
+def _tpl_key_plain(notification_type: str) -> str:
+    return f"NOTIFY_TEMPLATE_PLAIN_{notification_type.upper()}"
 
 
 async def _upsert_cycle_setting(session: AsyncSession, key: str, value: str) -> None:
@@ -71,6 +89,13 @@ async def bot_content_get(
             "daily_report_minute": int(by_key.get(_KEYS["daily_report_minute"], "0") or 0),
             "daily_report_html_template": by_key.get(_KEYS["daily_report_html_template"], ""),
             "daily_report_plain_template": by_key.get(_KEYS["daily_report_plain_template"], ""),
+            "notification_templates": {
+                nt: {
+                    "html": by_key.get(_tpl_key_html(nt), ""),
+                    "plain": by_key.get(_tpl_key_plain(nt), ""),
+                }
+                for nt in _NOTIFICATION_TYPES
+            },
         },
     }
 
@@ -83,6 +108,7 @@ async def bot_content_save(
     daily_report_minute: Annotated[int, Form()] = 0,
     daily_report_html_template: Annotated[str, Form()] = "",
     daily_report_plain_template: Annotated[str, Form()] = "",
+    notification_templates_json: Annotated[str, Form()] = "{}",
     csrf_token: Annotated[str, Form()] = "",
     session: AsyncSession = Depends(get_session),
 ):
@@ -105,5 +131,15 @@ async def bot_content_save(
     await _upsert_cycle_setting(
         session, _KEYS["daily_report_plain_template"], (daily_report_plain_template or "").strip()
     )
+    try:
+        templates_raw = json.loads(notification_templates_json or "{}")
+    except Exception:
+        templates_raw = {}
+    for nt in _NOTIFICATION_TYPES:
+        item = templates_raw.get(nt, {}) if isinstance(templates_raw, dict) else {}
+        html_tpl = (item.get("html", "") if isinstance(item, dict) else "").strip()
+        plain_tpl = (item.get("plain", "") if isinstance(item, dict) else "").strip()
+        await _upsert_cycle_setting(session, _tpl_key_html(nt), html_tpl)
+        await _upsert_cycle_setting(session, _tpl_key_plain(nt), plain_tpl)
     await session.commit()
     return {"ok": True}
