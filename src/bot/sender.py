@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 from jinja2 import Environment, FileSystemLoader
 
+from bot.logic import NOTIFICATION_TYPES, get_version_name, plural_days
 from matrix_send import room_send_with_retry
 from preferences import can_notify
 from utils import safe_html
@@ -291,8 +292,6 @@ async def send_matrix_message(
     extra_text: str = "",
 ) -> None:
     """Формирует и отправляет HTML-сообщение в Matrix через Jinja2-шаблон."""
-    from bot.config_state import get_version_name, plural_days
-
     global _notification_template
     if _notification_template is None:
         # Ленивая инициализация для тестов
@@ -358,9 +357,17 @@ async def send_safe(
     db_session=None,
 ) -> None:
     """Обёртка: проверка DND/рабочих часов → отправка с перехватом ошибок."""
-    from bot.logic import _cfg_for_room, _issue_priority_name
+    from bot.logic import _cfg_for_room, _issue_priority_name, issue_matches_cfg
 
     cfg = _cfg_for_room(user_cfg, room_id)
+    if not issue_matches_cfg(issue, cfg):
+        logger.debug(
+            "Пропуск (атрибуты): user %s, #%s, room=%s",
+            user_cfg.get("redmine_id"),
+            issue.id,
+            room_id[:20],
+        )
+        return
     if not can_notify(cfg, priority=_issue_priority_name(issue)):
         logger.debug(
             "Пропуск (время/DND): user %s, #%s, %s",

@@ -256,14 +256,12 @@ async def users_create(
         raise HTTPException(
             400, "Не удалось создать пользователя: проверьте уникальность redmine_id"
         )
-    if version_preset == "all":
-        version_keys = list(versions_catalog)
-    elif version_preset == "custom":
-        version_keys = admin._normalize_versions(version_values, versions_catalog)
-    else:
-        version_keys = admin._parse_json_string_list(
-            version_keys_json
-        ) or admin._parse_status_keys_list(initial_version_keys)
+    version_keys: list[str] = []
+    for key in (row.versions or []):
+        key_norm = str(key).strip()
+        if not key_norm or key_norm == "all":
+            continue
+        version_keys.append(key_norm)
     for vkey in version_keys:
         ex = await session.execute(
             select(UserVersionRoute.id).where(

@@ -110,14 +110,6 @@ async def load_catalogs(session: AsyncSession | None = None) -> BotCatalogs:
 
     closed_ids = frozenset(s.redmine_status_id for s in statuses if s.is_closed)
 
-    roles_assigned = sum(len(v) for v in role_map.values())
-    if statuses and roles_assigned == 0:
-        logger.warning(
-            "⚠ Статусы загружены (%d), но ни одному не назначена роль. "
-            "Назначьте роли в админке → Справочники → Статусы.",
-            len(statuses),
-        )
-
     logger.info(
         "📋 Статусы: %d (new=%d, info=%d, reopen=%d, transfer=%d, closed=%d)",
         len(statuses),

@@ -141,6 +141,7 @@ MATRIX_RETRY_BASE_DELAY_SEC = float(os.getenv("MATRIX_RETRY_BASE_DELAY_SEC", "1.
 BOT_LEASE_TTL_SECONDS = int(os.getenv("BOT_LEASE_TTL_SECONDS", "300"))
 HEARTBEAT_INTERVAL_SEC = int(os.getenv("HEARTBEAT_INTERVAL_SEC", "60"))
 CONFIG_POLL_INTERVAL_SEC = int(os.getenv("CONFIG_POLL_INTERVAL_SEC", "30"))
+COMMAND_POLL_INTERVAL_SEC = int(os.getenv("COMMAND_POLL_INTERVAL_SEC", "20"))
 
 # ═══════════════════════════════════════════════════════════════
 # СТАТУСЫ REDMINE и приоритеты — re-export из bot.logic (единственный источник)
@@ -188,6 +189,7 @@ __all__ = [
     "BOT_LEASE_TTL_SECONDS",
     "HEARTBEAT_INTERVAL_SEC",
     "CONFIG_POLL_INTERVAL_SEC",
+    "COMMAND_POLL_INTERVAL_SEC",
     # statuses (re-export from bot.logic)
     "STATUS_NEW",
     "STATUS_INFO_PROVIDED",

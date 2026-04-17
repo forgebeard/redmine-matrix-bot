@@ -20,6 +20,66 @@ if TYPE_CHECKING:
 logger = logging.getLogger("redmine_bot")
 
 
+def _safe_html_or_empty(value: str) -> str:
+    from utils import safe_html
+
+    return safe_html(value or "")
+
+
+def _render_daily_report_content(
+    *,
+    report_date: str,
+    total_open: int,
+    info_count: int,
+    overdue_count: int,
+    info_items_html: str,
+    overdue_items_html: str,
+) -> tuple[str, str]:
+    from bot.config_state import CATALOGS
+
+    html_tpl = (CATALOGS.cycle_settings.get("DAILY_REPORT_HTML_TEMPLATE") or "").strip()
+    plain_tpl = (CATALOGS.cycle_settings.get("DAILY_REPORT_PLAIN_TEMPLATE") or "").strip()
+
+    if not html_tpl:
+        html_tpl = (
+            "<h3>📅 Отчёт на {date}</h3>"
+            "<p><strong>Открытых задач:</strong> {total_open}</p>"
+            "<p><strong>Информация предоставлена:</strong> {info_count}</p>"
+            "{info_items_html}"
+            "<p><strong>Просроченных:</strong> {overdue_count}</p>"
+            "{overdue_items_html}"
+        )
+    if not plain_tpl:
+        plain_tpl = "Отчёт {date}: {total_open} задач, {overdue_count} просрочено"
+
+    kwargs = {
+        "date": report_date,
+        "total_open": total_open,
+        "info_count": info_count,
+        "overdue_count": overdue_count,
+        "info_items_html": info_items_html,
+        "overdue_items_html": overdue_items_html,
+    }
+    try:
+        html = html_tpl.format(**kwargs)
+    except Exception:
+        logger.warning("daily_report_html_template_invalid_format; fallback to default")
+        html = (
+            "<h3>📅 Отчёт на {date}</h3>"
+            "<p><strong>Открытых задач:</strong> {total_open}</p>"
+            "<p><strong>Информация предоставлена:</strong> {info_count}</p>"
+            "{info_items_html}"
+            "<p><strong>Просроченных:</strong> {overdue_count}</p>"
+            "{overdue_items_html}"
+        ).format(**kwargs)
+    try:
+        plain = plain_tpl.format(**kwargs)
+    except Exception:
+        logger.warning("daily_report_plain_template_invalid_format; fallback to default")
+        plain = "Отчёт {date}: {total_open} задач, {overdue_count} просрочено".format(**kwargs)
+    return html, plain
+
+
 async def check_all_users(
     client: AsyncClient,
     redmine: Redmine,
@@ -170,34 +230,36 @@ async def daily_report(
             [i for i in issues if i.due_date and i.due_date < today], key=lambda i: i.due_date
         )
 
-        html = f"<h3>📅 Отчёт на {today.strftime('%d.%m.%Y')}</h3>"
-        html += f"<p><strong>Открытых задач:</strong> {len(issues)}</p>"
-        html += f"<p><strong>«{STATUS_INFO_PROVIDED}»:</strong> {len(info_provided)}</p>"
-
+        info_items_html = ""
         if info_provided:
-            html += "<ul>"
+            info_items_html = "<ul>"
             for i in info_provided[:10]:
-                html += (
+                info_items_html += (
                     f'<li><a href="{redmine_url}/issues/{i.id}">#{i.id}</a> '
-                    f"— {safe_html(i.subject)}</li>"
+                    f"— {_safe_html_or_empty(i.subject)}</li>"
                 )
-            html += "</ul>"
+            info_items_html += "</ul>"
             if len(info_provided) > 10:
-                html += f"<p><em>...и ещё {len(info_provided) - 10}</em></p>"
+                info_items_html += f"<p><em>...и ещё {len(info_provided) - 10}</em></p>"
 
-        html += f"<p><strong>Просроченных:</strong> {len(overdue)}</p>"
+        overdue_items_html = ""
         if overdue:
-            html += "<ul>"
+            overdue_items_html = "<ul>"
             for i in overdue[:10]:
                 days = (today - i.due_date).days
-                html += (
+                overdue_items_html += (
                     f'<li><a href="{redmine_url}/issues/{i.id}">#{i.id}</a> '
-                    f"— {safe_html(i.subject)} ({plural_days(days)})</li>"
+                    f"— {_safe_html_or_empty(i.subject)} ({plural_days(days)})</li>"
                 )
-            html += "</ul>"
+            overdue_items_html += "</ul>"
 
-        plain = (
-            f"Отчёт {today.strftime('%d.%m.%Y')}: {len(issues)} задач, {len(overdue)} просрочено"
+        html, plain = _render_daily_report_content(
+            report_date=today.strftime("%d.%m.%Y"),
+            total_open=len(issues),
+            info_count=len(info_provided),
+            overdue_count=len(overdue),
+            info_items_html=info_items_html,
+            overdue_items_html=overdue_items_html,
         )
 
         try:

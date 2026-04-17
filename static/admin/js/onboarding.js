@@ -165,4 +165,91 @@
       });
     });
   })();
+
+  /* --- Notifications settings (Phase 2) --- */
+  (function () {
+    var saveBtn = document.getElementById("notifications-save-btn");
+    var status = document.getElementById("notifications-save-status");
+    var enabled = document.getElementById("daily_report_enabled");
+    var hour = document.getElementById("daily_report_hour");
+    var minute = document.getElementById("daily_report_minute");
+    var htmlTpl = document.getElementById("daily_report_html_template");
+    var plainTpl = document.getElementById("daily_report_plain_template");
+    if (!saveBtn || !status || !enabled || !hour || !minute || !htmlTpl || !plainTpl) return;
+
+    function csrfToken() {
+      var csrfInput = form.querySelector('input[name="csrf_token"]');
+      return csrfInput ? csrfInput.value : "";
+    }
+
+    function setBusy(isBusy) {
+      saveBtn.disabled = !!isBusy;
+    }
+
+    function normalizeInt(raw, min, max, fallback) {
+      var n = parseInt(raw, 10);
+      if (!isFinite(n)) return fallback;
+      if (n < min) return min;
+      if (n > max) return max;
+      return n;
+    }
+
+    function loadSettings() {
+      status.textContent = "Загрузка настроек...";
+      fetch("/api/bot/content", {
+        method: "GET",
+        credentials: "same-origin",
+        headers: { Accept: "application/json" }
+      }).then(function (resp) {
+        if (!resp.ok) throw new Error("load_failed");
+        return resp.json();
+      }).then(function (data) {
+        var s = (data && data.settings) || {};
+        enabled.checked = !!s.daily_report_enabled;
+        hour.value = normalizeInt(s.daily_report_hour, 0, 23, 9);
+        minute.value = normalizeInt(s.daily_report_minute, 0, 59, 0);
+        htmlTpl.value = s.daily_report_html_template || "";
+        plainTpl.value = s.daily_report_plain_template || "";
+        status.textContent = "";
+      }).catch(function () {
+        status.textContent = "Не удалось загрузить настройки уведомлений.";
+      });
+    }
+
+    saveBtn.addEventListener("click", function () {
+      setBusy(true);
+      status.textContent = "Сохранение...";
+
+      var fd = new FormData();
+      fd.append("csrf_token", csrfToken());
+      fd.append("daily_report_enabled", enabled.checked ? "true" : "false");
+      fd.append("daily_report_hour", String(normalizeInt(hour.value, 0, 23, 9)));
+      fd.append("daily_report_minute", String(normalizeInt(minute.value, 0, 59, 0)));
+      fd.append("daily_report_html_template", htmlTpl.value || "");
+      fd.append("daily_report_plain_template", plainTpl.value || "");
+
+      fetch("/api/bot/content", {
+        method: "POST",
+        body: fd,
+        credentials: "same-origin",
+        headers: { Accept: "application/json" }
+      }).then(function (resp) {
+        if (!resp.ok) throw new Error("save_failed");
+        return resp.json();
+      }).then(function (data) {
+        if (data && data.ok) {
+          status.textContent = "Настройки уведомлений сохранены.";
+          showToast("Настройки уведомлений сохранены", false);
+        } else {
+          status.textContent = "Ошибка сохранения.";
+        }
+      }).catch(function () {
+        status.textContent = "Ошибка сети при сохранении.";
+      }).finally(function () {
+        setBusy(false);
+      });
+    });
+
+    loadSettings();
+  })();
 })();

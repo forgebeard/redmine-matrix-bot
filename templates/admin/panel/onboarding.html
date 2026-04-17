@@ -10,6 +10,7 @@
   <div class="settings-tabs" id="settings-tabs">
     <button type="button" class="tab-btn active" data-tab="general">Общие настройки</button>
     <button type="button" class="tab-btn" data-tab="dictionary">Справочник</button>
+    <button type="button" class="tab-btn" data-tab="notifications">Уведомления</button>
   </div>
 
   <form class="form form--settings" method="post" action="/onboarding/save" id="settings-form">
@@ -280,6 +281,59 @@
           <button type="button" class="btn btn-ghost" id="priority-add-btn">Добавить</button>
         </div>
       </div>
+    </div>
+
+    <!-- Вкладка: Уведомления -->
+    <div class="tab-content" id="tab-notifications">
+      <div class="section-header section-header--action">
+        <h2>Настройки уведомлений</h2>
+        <div class="head-line"></div>
+        <div class="section-actions">
+          <button type="button" class="btn btn-primary" id="notifications-save-btn">Сохранить</button>
+        </div>
+      </div>
+      <p id="notifications-save-status" class="muted form-status" aria-live="polite"></p>
+
+      <section class="service-bubble">
+        <div class="card-title">Утренний отчет</div>
+        <div class="field">
+          <label>
+            <input type="checkbox" id="daily_report_enabled"/>
+            Включить утренний отчет
+          </label>
+        </div>
+        <div class="db-grid">
+          <div class="field">
+            <label for="daily_report_hour">Час</label>
+            <input id="daily_report_hour" type="number" min="0" max="23" step="1" value="9"/>
+          </div>
+          <div class="field">
+            <label for="daily_report_minute">Минута</label>
+            <input id="daily_report_minute" type="number" min="0" max="59" step="1" value="0"/>
+          </div>
+        </div>
+      </section>
+
+      <section class="service-bubble">
+        <div class="card-title">Шаблоны отчета</div>
+        <div class="field">
+          <label for="daily_report_html_template">HTML-шаблон</label>
+          <textarea
+            id="daily_report_html_template"
+            rows="8"
+            placeholder="<h3>Отчет на {date}</h3><p>Открытых: {total_open}</p>"
+          ></textarea>
+          <p class="muted">Поддерживаются плейсхолдеры: {date}, {total_open}, {info_count}, {overdue_count}, {info_items_html}, {overdue_items_html}.</p>
+        </div>
+        <div class="field">
+          <label for="daily_report_plain_template">Текстовый шаблон</label>
+          <textarea
+            id="daily_report_plain_template"
+            rows="4"
+            placeholder="Отчёт {date}: {total_open} задач, {overdue_count} просрочено"
+          ></textarea>
+        </div>
+      </section>
     </div>
 
   </form>

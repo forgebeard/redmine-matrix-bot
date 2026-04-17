@@ -33,6 +33,32 @@ else:
 # КОНСТАНТЫ
 # ═══════════════════════════════════════════════════════════════════════════
 
+# Legacy status names (used by scheduler/main/config compatibility layer)
+STATUS_NEW = "Новая"
+STATUS_INFO_PROVIDED = "Информация предоставлена"
+STATUS_REOPENED = "Открыта повторно"
+STATUS_RV = "Передано в работу.РВ"
+STATUSES_TRANSFERRED = {STATUS_RV}
+
+# Compatibility exports for config/sender legacy usage.
+STATUS_NAMES = {
+    "new": STATUS_NEW,
+    "info_provided": STATUS_INFO_PROVIDED,
+    "reopened": STATUS_REOPENED,
+    "transferred": STATUS_RV,
+}
+PRIORITY_NAMES: dict[str, str] = {}
+PRIORITY_EMERGENCY = "Аварийный"
+NOTIFICATION_TYPES = {
+    "new": ("🆕", "Новая задача"),
+    "reopened": ("♻️", "Задача открыта повторно"),
+    "info": ("ℹ️", "Информация предоставлена"),
+    "reminder": ("⏰", "Напоминание"),
+    "overdue": ("⚠️", "Просроченная задача"),
+    "issue_updated": ("📝", "Задача обновлена"),
+    "status_change": ("🔁", "Смена статуса"),
+}
+
 FIELD_NAMES: dict[str, str | None] = {
     "status_id": "Статус",
     "assigned_to_id": "Назначена",
@@ -224,6 +250,8 @@ def _cfg_for_room(
         return user_cfg
     merged = dict(user_cfg)
     merged["notify"] = gd.get("notify") if isinstance(gd.get("notify"), list) else ["all"]
+    merged["versions"] = gd.get("versions") if isinstance(gd.get("versions"), list) else ["all"]
+    merged["priorities"] = gd.get("priorities") if isinstance(gd.get("priorities"), list) else ["all"]
     wh = gd.get("work_hours")
     if wh:
         merged["work_hours"] = wh
@@ -236,6 +264,48 @@ def _cfg_for_room(
         merged.pop("work_days", None)
     merged["dnd"] = bool(gd.get("dnd"))
     return merged
+
+
+def _matches_filter(filter_values: Any, candidates: set[str]) -> bool:
+    values = filter_values if isinstance(filter_values, list) else ["all"]
+    norm = {str(v).strip().lower() for v in values if str(v).strip()}
+    if not norm or "all" in norm:
+        return True
+    for c in candidates:
+        if c.strip().lower() in norm:
+            return True
+    return False
+
+
+def issue_matches_cfg(issue: _IssueLike, user_cfg: dict[str, Any]) -> bool:
+    """Attribute matching by status/version/priority for user/group delivery config."""
+    status_candidates = {str(getattr(getattr(issue, "status", None), "id", "")).strip()}
+    status_name = str(getattr(getattr(issue, "status", None), "name", "")).strip()
+    if status_name:
+        status_candidates.add(status_name)
+
+    version_candidates: set[str] = set()
+    fv = getattr(issue, "fixed_version", None)
+    if fv is not None:
+        version_id = str(getattr(fv, "id", "")).strip()
+        version_name = str(getattr(fv, "name", "")).strip()
+        if version_id:
+            version_candidates.add(version_id)
+        if version_name:
+            version_candidates.add(version_name)
+    if not version_candidates:
+        version_candidates.add("__none__")
+
+    priority_candidates = {str(getattr(getattr(issue, "priority", None), "id", "")).strip()}
+    priority_name = str(getattr(getattr(issue, "priority", None), "name", "")).strip()
+    if priority_name:
+        priority_candidates.add(priority_name)
+
+    return (
+        _matches_filter(user_cfg.get("notify", ["all"]), status_candidates)
+        and _matches_filter(user_cfg.get("versions", ["all"]), version_candidates)
+        and _matches_filter(user_cfg.get("priorities", ["all"]), priority_candidates)
+    )
 
 
 # ═══════════════════════════════════════════════════════════════════════════

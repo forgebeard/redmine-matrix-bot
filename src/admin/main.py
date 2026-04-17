@@ -89,6 +89,8 @@ NOTIFY_TYPE_KEYS: list[str] = []
 from admin.db_config import router as db_config_router  # noqa: E402
 from admin.routes.app_users import router as app_users_router  # noqa: E402
 from admin.routes.auth import router as auth_router  # noqa: E402
+from admin.routes.bot_content import router as bot_content_router  # noqa: E402
+from admin.routes.bot_runtime import router as bot_runtime_router  # noqa: E402
 from admin.routes.catalog import router as catalog_router  # noqa: E402
 from admin.routes.dashboard import router as dashboard_router  # noqa: E402
 from admin.routes.events import router as events_router  # noqa: E402
@@ -105,6 +107,8 @@ from admin.routes.users import router as users_router  # noqa: E402
 
 app.include_router(health_router)
 app.include_router(auth_router)
+app.include_router(bot_content_router)
+app.include_router(bot_runtime_router)
 app.include_router(ops_router)
 app.include_router(dashboard_router)
 app.include_router(events_router)

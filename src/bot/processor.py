@@ -52,6 +52,13 @@ async def check_user_issues(
     задачи, обновлённые с момента последнего успешного цикла.
     """
 
+    from admin.services.bot_decisions import (
+        build_first_notification_actions,
+        decide_info_reminder,
+        decide_journal_update,
+        decide_overdue,
+        decide_first_issue_notification,
+    )
     from bot.sender import send_safe
     from database.state_repo import load_user_issue_state
 
@@ -98,20 +105,21 @@ async def check_user_issues(
     today = now.date()
 
     # Импорт helpers из bot.logic
-    from bot.config_state import STATUS_ROOM_MAP, USERS, VERSION_ROOM_MAP
+    from bot.config_state import USERS, VERSION_ROOM_MAP
     from bot.logic import (
         STATUS_INFO_PROVIDED,
         STATUS_REOPENED,
         _group_room,
+        describe_journal,
+        detect_new_journals,
+        detect_status_change,
+        should_notify,
     )
     from bot.logic import (
         _group_member_rooms as _group_member_rooms_raw,
     )
     from bot.logic import (
         get_extra_rooms_for_new as _get_extra_rooms_for_new_raw,
-    )
-    from bot.logic import (
-        get_extra_rooms_for_rv as _get_extra_rooms_for_rv_raw,
     )
 
     for issue in issues:
@@ -123,11 +131,6 @@ async def check_user_issues(
 
         def _get_extra_rooms_for_new(issue, user_cfg: dict) -> set[str]:
             return _get_extra_rooms_for_new_raw(issue, user_cfg, VERSION_ROOM_MAP, USERS)
-
-        def _get_extra_rooms_for_rv(issue, user_cfg: dict) -> set[str]:
-            return _get_extra_rooms_for_rv_raw(
-                issue, user_cfg, STATUS_ROOM_MAP, VERSION_ROOM_MAP, USERS
-            )
 
         try:
             # ═══ 1. СМЕНА СТАТУСА ═══
@@ -144,44 +147,53 @@ async def check_user_issues(
                 sent[iid]["status"] = issue.status.name
                 changed_sent.add(iid)
 
-            # ═══ 2. НОВАЯ ЗАДАЧА ═══
-            if issue.status.id in CATALOGS.trigger_new_ids and iid not in sent:
-                if should_notify(user_cfg, "new"):
-                    await send_safe(client, issue, user_cfg, room, "new")
-                    for personal_room in _group_member_rooms(user_cfg):
-                        if personal_room != room:
-                            await send_safe(client, issue, user_cfg, personal_room, "new")
-                    group_room = _group_room(user_cfg)
-                    if group_room and should_notify(_cfg_for_room(user_cfg, group_room), "new"):
-                        await send_safe(client, issue, user_cfg, group_room, "new")
-                    for extra_room in _get_extra_rooms_for_new(issue, user_cfg):
-                        await send_safe(client, issue, user_cfg, extra_room, "new")
+            first_decision = decide_first_issue_notification(
+                issue_status_name=issue.status.name,
+                already_sent=iid in sent,
+                status_reopened=STATUS_REOPENED,
+            )
+            # ═══ 2/3/5. ПЕРВОЕ УВЕДОМЛЕНИЕ (new/transferred/reopened) ═══
+            if first_decision is not None:
+                if should_notify(user_cfg, first_decision.notification_kind):
+                    if first_decision.notification_kind == "new":
+                        group_room = _group_room(user_cfg)
+                        group_enabled = bool(
+                            group_room and should_notify(_cfg_for_room(user_cfg, group_room), "new")
+                        )
+                        extra_rooms = _get_extra_rooms_for_new(issue, user_cfg)
+                        actions = build_first_notification_actions(
+                            main_room=room,
+                            notification_kind="new",
+                            personal_rooms={r for r in _group_member_rooms(user_cfg) if r != room},
+                            group_room=group_room,
+                            group_enabled=group_enabled,
+                            extra_rooms=extra_rooms,
+                        )
+                    else:
+                        actions = build_first_notification_actions(
+                            main_room=room,
+                            notification_kind=first_decision.notification_kind,
+                            personal_rooms=set(),
+                            group_room=None,
+                            group_enabled=False,
+                            extra_rooms=set(),
+                        )
+                    for action in actions:
+                        await send_safe(
+                            client,
+                            issue,
+                            user_cfg,
+                            action.room_id,
+                            action.notification_kind,
+                        )
                 sent[iid] = {
                     "notified_at": now.isoformat(),
-                    "status": STATUS_NEW,
-                    "group_last_notified_at": now.isoformat(),
+                    "status": first_decision.sent_status,
                 }
+                if first_decision.set_group_notified:
+                    sent[iid]["group_last_notified_at"] = now.isoformat()
                 changed_sent.add(iid)
-
-            # ═══ 3. ПЕРЕДАНО В РАБОТУ.РВ ═══
-            elif issue.status.id in CATALOGS.trigger_transferred_ids and iid not in sent:
-                if should_notify(user_cfg, "new"):
-                    await send_safe(client, issue, user_cfg, room, "new")
-                    for personal_room in _group_member_rooms(user_cfg):
-                        if personal_room != room:
-                            await send_safe(client, issue, user_cfg, personal_room, "new")
-                    group_room = _group_room(user_cfg)
-                    if group_room and should_notify(_cfg_for_room(user_cfg, group_room), "new"):
-                        await send_safe(client, issue, user_cfg, group_room, "new")
-                    for extra_room in _get_extra_rooms_for_rv(issue, user_cfg):
-                        await send_safe(client, issue, user_cfg, extra_room, "new")
-                sent[iid] = {
-                    "notified_at": now.isoformat(),
-                    "status": STATUS_RV,
-                    "group_last_notified_at": now.isoformat(),
-                }
-                changed_sent.add(iid)
-            elif issue.status.id in (CATALOGS.trigger_new_ids | CATALOGS.trigger_transferred_ids) and iid in sent:
+            elif iid in sent and sent.get(iid, {}).get("group_last_notified_at"):
                 group_room = _group_room(user_cfg)
                 if group_room:
                     last_group = sent.get(iid, {}).get("group_last_notified_at")
@@ -199,43 +211,28 @@ async def check_user_issues(
                         changed_sent.add(iid)
 
             # ═══ 4. ИНФОРМАЦИЯ ПРЕДОСТАВЛЕНА ═══
-            elif issue.status.id in CATALOGS.trigger_info_provided_ids:
-                if iid not in sent:
-                    if should_notify(user_cfg, "info"):
-                        await send_safe(client, issue, user_cfg, room, "info")
+            elif issue.status.name == STATUS_INFO_PROVIDED:
+                info_decision = decide_info_reminder(
+                    is_info_status=True,
+                    already_sent=iid in sent,
+                    can_notify_info=should_notify(user_cfg, "info"),
+                    can_notify_reminder=should_notify(user_cfg, "reminder"),
+                    now=now,
+                    reminder_after_seconds=REMINDER_AFTER,
+                    last_reminder_iso=reminders.get(iid, {}).get("last_reminder"),
+                    sent_notified_at_iso=sent.get(iid, {}).get("notified_at"),
+                )
+                if info_decision and info_decision.notify_kind:
+                    await send_safe(client, issue, user_cfg, room, info_decision.notify_kind)
+                if info_decision and info_decision.create_sent_state:
                     sent[iid] = {
                         "notified_at": now.isoformat(),
                         "status": STATUS_INFO_PROVIDED,
                     }
                     changed_sent.add(iid)
-                else:
-                    # Напоминание каждый час
-                    if should_notify(user_cfg, "reminder"):
-                        last_rem = reminders.get(iid, {}).get("last_reminder")
-                        if last_rem:
-                            time_since = (
-                                now - ensure_tz(datetime.fromisoformat(last_rem))
-                            ).total_seconds()
-                        else:
-                            notified_at = ensure_tz(
-                                datetime.fromisoformat(sent[iid]["notified_at"])
-                            )
-                            time_since = (now - notified_at).total_seconds()
-
-                        if time_since >= REMINDER_AFTER:
-                            await send_safe(client, issue, user_cfg, room, "reminder")
-                            reminders[iid] = {"last_reminder": now.isoformat()}
-                            changed_reminders.add(iid)
-
-            # ═══ 5. ОТКРЫТО ПОВТОРНО ═══
-            elif issue.status.id in CATALOGS.trigger_reopened_ids and iid not in sent:
-                if should_notify(user_cfg, "reopened"):
-                    await send_safe(client, issue, user_cfg, room, "reopened")
-                sent[iid] = {
-                    "notified_at": now.isoformat(),
-                    "status": STATUS_REOPENED,
-                }
-                changed_sent.add(iid)
+                if info_decision and info_decision.update_reminder_state:
+                    reminders[iid] = {"last_reminder": now.isoformat()}
+                    changed_reminders.add(iid)
 
             # ═══ 6. ПРОЧИЕ СТАТУСЫ — первое обнаружение (тихо) ═══
             elif iid not in sent:
@@ -246,44 +243,45 @@ async def check_user_issues(
                 changed_sent.add(iid)
 
             # ═══ 7. ПРОСРОЧЕННЫЕ ЗАДАЧИ ═══
-            if issue.due_date and issue.due_date < today:
-                if should_notify(user_cfg, "overdue"):
-                    last_n = overdue_n.get(iid, {}).get("last_notified")
-                    if not last_n or ensure_tz(datetime.fromisoformat(last_n)).date() < today:
-                        await send_safe(client, issue, user_cfg, room, "overdue")
-                        overdue_n[iid] = {"last_notified": now.isoformat()}
-                        changed_overdue.add(iid)
+            overdue_decision = decide_overdue(
+                is_overdue=bool(issue.due_date and issue.due_date < today),
+                can_notify_overdue=should_notify(user_cfg, "overdue"),
+                today_iso=today.isoformat(),
+                last_notified_iso=overdue_n.get(iid, {}).get("last_notified"),
+            )
+            if overdue_decision.should_send:
+                await send_safe(client, issue, user_cfg, room, "overdue")
+            if overdue_decision.should_update_state:
+                overdue_n[iid] = {"last_notified": now.isoformat()}
+                changed_overdue.add(iid)
 
             # ═══ 8. ЖУРНАЛЫ: КОММЕНТАРИИ И ИЗМЕНЕНИЯ ПОЛЕЙ ═══
             new_jrnls, max_id = detect_new_journals(issue, journals)
 
             # Защита от спама старыми журналами
-            if iid not in journals:
-                if max_id > 0:
-                    journals[iid] = {"last_journal_id": max_id}
-                    changed_journals.add(iid)
+            prev_last_journal_id = journals.get(iid, {}).get("last_journal_id", 0)
+            had_previous_journal_state = iid in journals
+            _skip_st = old_status is not None
+            descs = [d for d in (describe_journal(j, skip_status=_skip_st) for j in new_jrnls) if d]
+            journal_decision = decide_journal_update(
+                had_previous_journal_state=had_previous_journal_state,
+                current_max_journal_id=max_id,
+                previous_last_journal_id=prev_last_journal_id,
+                has_new_journal_descriptions=bool(descs),
+                was_issue_previously_notified=iid in sent,
+                can_notify_issue_updated=should_notify(user_cfg, "issue_updated"),
+            )
+            if journal_decision.should_send_update:
+                tail = descs[-5:]
+                combined = "<br/>".join(_safe_html(d) for d in tail)
+                if len(descs) > 5:
+                    combined = f"<em>...и ещё {len(descs) - 5}</em><br/>" + combined
+                await send_safe(client, issue, user_cfg, room, "issue_updated", extra_text=combined)
+            if journal_decision.should_update_last_seen:
+                journals[iid] = {"last_journal_id": max_id}
+                changed_journals.add(iid)
+                if not had_previous_journal_state and max_id > 0:
                     logger.debug("📝 #%s: инициализация journal_id=%s (пропуск)", iid, max_id)
-            elif new_jrnls and iid in sent and should_notify(user_cfg, "issue_updated"):
-                _skip_st = old_status is not None
-                descs = [
-                    d for d in (describe_journal(j, skip_status=_skip_st) for j in new_jrnls) if d
-                ]
-                if descs:
-                    tail = descs[-5:]
-                    combined = "<br/>".join(_safe_html(d) for d in tail)
-                    if len(descs) > 5:
-                        combined = f"<em>...и ещё {len(descs) - 5}</em><br/>" + combined
-                    await send_safe(
-                        client, issue, user_cfg, room, "issue_updated", extra_text=combined
-                    )
-
-                if max_id > journals.get(iid, {}).get("last_journal_id", 0):
-                    journals[iid] = {"last_journal_id": max_id}
-                    changed_journals.add(iid)
-            else:
-                if max_id > journals.get(iid, {}).get("last_journal_id", 0):
-                    journals[iid] = {"last_journal_id": max_id}
-                    changed_journals.add(iid)
 
         except Exception as e:
             logger.error("❌ Ошибка обработки #%s (user %s): %s", issue.id, uid, e, exc_info=True)

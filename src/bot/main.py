@@ -23,7 +23,6 @@ from redminelib import Redmine
 from redminelib.exceptions import AuthError, BaseRedmineError, ForbiddenError
 
 from bot.logic import (
-    NOTIFICATION_TYPES,
     STATUS_INFO_PROVIDED,
     STATUS_NEW,
     STATUS_REOPENED,
@@ -54,7 +53,6 @@ __all__ = [
     "STATUS_REOPENED",
     "STATUS_RV",
     "STATUSES_TRANSFERRED",
-    "NOTIFICATION_TYPES",
     "plural_days",
     "get_version_name",
     "should_notify",
@@ -132,6 +130,7 @@ from config import (  # noqa: E402, I001
     BOT_LEASE_TTL_SECONDS,
     BOT_TIMEZONE,
     CHECK_INTERVAL,
+    COMMAND_POLL_INTERVAL_SEC,
     CONFIG_POLL_INTERVAL_SEC,
     GROUP_REPEAT_SECONDS,
     MATRIX_DEVICE_ID as MATRIX_DEVICE_ID_ENV,
@@ -225,6 +224,14 @@ def today_tz():
     return now_tz().date()
 
 
+def _safe_hour(value: int) -> int:
+    return max(0, min(23, int(value)))
+
+
+def _safe_minute(value: int) -> int:
+    return max(0, min(59, int(value)))
+
+
 def _log_redmine_list_error(uid: int, err: Exception, where: str) -> None:
     """Логирует сбой Redmine при issue.filter и т.п."""
     if isinstance(err, (AuthError, ForbiddenError)):
@@ -247,7 +254,13 @@ async def main() -> None:
         ACCESS_TOKEN, \
         MATRIX_USER_ID, \
         REDMINE_URL, \
-        REDMINE_KEY
+        REDMINE_KEY, \
+        CHECK_INTERVAL, \
+        REMINDER_AFTER, \
+        GROUP_REPEAT_SECONDS, \
+        BOT_TIMEZONE, \
+        BOT_TZ, \
+        BOT_LEASE_TTL_SECONDS
 
     logger.info("🚀 Бот запущен")
 
@@ -394,20 +407,20 @@ async def main() -> None:
     else:
         logger.info("⚙ cycle_settings: таблица пуста, используются значения из .env")
 
-     ── Загрузка справочников (каталогов) из БД ──────────────
+    # ── Загрузка справочников (каталогов) из БД ──────────────
     from bot.catalogs import load_catalogs
     import bot.config_state as _cs
 
     try:
         async with session_factory() as session:
             CATALOGS = await load_catalogs(session)
-    _cs.CATALOGS = CATALOGS
-    logger.info(
-        "✅ Справочники загружены: %d статусов, %d приоритетов, %d типов уведомлений",
-        len(CATALOGS.status_id_to_name),
-        len(CATALOGS.priority_id_to_name),
-        len(CATALOGS.notification_types),
-    )
+        _cs.CATALOGS = CATALOGS
+        logger.info(
+            "✅ Справочники загружены: %d статусов, %d приоритетов, %d типов уведомлений",
+            len(CATALOGS.status_id_to_name),
+            len(CATALOGS.priority_id_to_name),
+            len(CATALOGS.notification_types),
+        )
     except Exception as e:
         logger.error("❌ Справочники не загружены: %s", e, exc_info=True)
         return
@@ -497,8 +510,8 @@ async def main() -> None:
         check_all_users,
         cleanup_state_files,
         daily_report,
-        retry_dlq_notifications,
     )
+    from bot.command_worker import process_backend_commands
 
     def _redmine_client_for_user(redmine_inst, user_cfg):
         from bot.sender import REDMINE_URL as _RU
@@ -545,19 +558,35 @@ async def main() -> None:
         next_run_time=datetime.now(tz=BOT_TZ),
     )
 
-    scheduler.add_job(
-        daily_report,
-        "cron",
-        hour=9,
-        minute=0,
-        args=[client, redmine],
-        kwargs={
-            "now_tz": now_tz,
-            "today_tz": today_tz,
-            "redmine_client_for_user": _redmine_client_for_user,
-            "redmine_url": REDMINE_URL,
-        },
+    daily_report_enabled = str(CATALOGS.cycle_settings.get("DAILY_REPORT_ENABLED", "1")).lower() in (
+        "1",
+        "true",
+        "on",
     )
+    daily_report_hour = _safe_hour(CATALOGS.cycle_int("DAILY_REPORT_HOUR", 9))
+    daily_report_minute = _safe_minute(CATALOGS.cycle_int("DAILY_REPORT_MINUTE", 0))
+    if daily_report_enabled:
+        scheduler.add_job(
+            daily_report,
+            "cron",
+            hour=daily_report_hour,
+            minute=daily_report_minute,
+            args=[client, redmine],
+            kwargs={
+                "now_tz": now_tz,
+                "today_tz": today_tz,
+                "redmine_client_for_user": _redmine_client_for_user,
+                "redmine_url": REDMINE_URL,
+            },
+        )
+        logger.info(
+            "📊 Утренний отчёт включен: %02d:%02d (%s)",
+            daily_report_hour,
+            daily_report_minute,
+            BOT_TZ,
+        )
+    else:
+        logger.info("📊 Утренний отчёт отключен (DAILY_REPORT_ENABLED=0)")
 
     scheduler.add_job(
         cleanup_state_files,
@@ -572,11 +601,14 @@ async def main() -> None:
     )
 
     scheduler.add_job(
-        retry_dlq_notifications,
+        process_backend_commands,
         "interval",
-        seconds=120,
+        seconds=COMMAND_POLL_INTERVAL_SEC,
         args=[client],
-        kwargs={"now_tz": now_tz},
+        kwargs={
+            "admin_url": os.getenv("ADMIN_URL", "http://admin:8080"),
+            "limit": 20,
+        },
         max_instances=1,
         coalesce=True,
     )

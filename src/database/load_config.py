@@ -38,6 +38,8 @@ def user_orm_to_cfg(
         "redmine_id": row.redmine_id,
         "room": row.room,
         "notify": row.notify if isinstance(row.notify, list) else ["all"],
+        "versions": row.versions if isinstance(row.versions, list) else ["all"],
+        "priorities": row.priorities if isinstance(row.priorities, list) else ["all"],
     }
     if row.group_id is not None:
         d["group_id"] = row.group_id
@@ -49,6 +51,8 @@ def user_orm_to_cfg(
                 d["group_timezone"] = g.timezone
             d["group_delivery"] = {
                 "notify": g.notify if isinstance(g.notify, list) else ["all"],
+                "versions": g.versions if isinstance(g.versions, list) else ["all"],
+                "priorities": g.priorities if isinstance(g.priorities, list) else ["all"],
                 "work_hours": g.work_hours,
                 "work_days": g.work_days,
                 "dnd": bool(g.dnd),

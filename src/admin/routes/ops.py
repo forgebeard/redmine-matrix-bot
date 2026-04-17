@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 import threading
 import time
 from typing import Annotated
@@ -17,20 +16,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from admin.api_schemas import (
     OkResponse,
-    ServiceStatusResponse,
 )
 from admin.helpers import (
     DASHBOARD_PATH,
     _append_audit_file_line,
     _append_ops_to_events_log,
     _client_ip,
-    _now_utc,
     _rate_limiter,
     _verify_csrf,
 )
-from database.models import BotHeartbeat, BotOpsAudit
+from database.models import BotOpsAudit
 from database.session import get_session, get_session_factory
-from ops.docker_control import DockerControlError, control_service, get_service_status
+from ops.docker_control import DockerControlError, control_service
 
 logger = logging.getLogger("redmine_admin")
 
@@ -177,34 +174,3 @@ async def bot_ops_action(
     return RedirectResponse(DASHBOARD_PATH + "?" + urlencode(q), status_code=303)
 
 
-@router.post("/api/bot/heartbeat", response_model=OkResponse)
-async def bot_heartbeat(session: AsyncSession = Depends(get_session)):
-    from sqlalchemy import insert
-
-    stmt = insert(BotHeartbeat).values(
-        instance_id=os.getenv("BOT_INSTANCE_ID", "default"),
-        heartbeat_at=_now_utc(),
-        status="running",
-    )
-    await session.execute(stmt)
-    await session.commit()
-    return OkResponse(ok=True)
-
-
-@router.get("/api/bot/status", response_model=ServiceStatusResponse)
-async def bot_status():
-    try:
-        status = get_service_status()
-        return ServiceStatusResponse(
-            ok=True,
-            status=status.get("status", "unknown"),
-            uptime=status.get("uptime"),
-            started_at=status.get("started_at"),
-            errors=status.get("errors", 0),
-        )
-    except DockerControlError:
-        return ServiceStatusResponse(
-            ok=False,
-            status="error",
-            errors=0,
-        )
