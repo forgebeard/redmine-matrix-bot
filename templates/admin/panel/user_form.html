@@ -40,9 +40,9 @@
                    value="{{ room_localpart if room_localpart else '' }}"
                    placeholder="ivan.ivanov"/>
             {% if matrix_domain %}
-            <p class="field-hint">Домен: <code>{{ matrix_domain }}</code>. Введите только логин.</p>
+            <p class="field-hint">Домен: <code>{{ matrix_domain }}</code>. Логин без <code>@</code> сохранится как <code>@логин:{{ matrix_domain }}</code>. Можно указать полный MXID (<code>@…:сервер</code>) или полный id комнаты (<code>!room_id:сервер</code>); для личных уведомлений обычно нужен MXID.</p>
             {% else %}
-            <p class="field-hint">Полный ID вида @login:domain</p>
+            <p class="field-hint">Укажите полный MXID (<code>@login:domain</code>) или полный id комнаты (<code>!room_id:server</code>).</p>
             {% endif %}
           </div>
         </div>

@@ -982,7 +982,7 @@ def _room_localpart(room_id: str) -> str:
 
 
 async def _build_room_id_async(localpart: str, session: AsyncSession) -> str:
-    """Constructs full room_id from localpart + bot domain from DB."""
+    """Build Matrix value from input + bot domain: bare localpart → MXID @lp:domain; !… room unchanged."""
     mxid = await _load_secret_plain(session, "MATRIX_USER_ID")
     domain = mxid.split(":", 1)[1] if ":" in mxid else ""
     if not localpart or not domain:
@@ -991,7 +991,7 @@ async def _build_room_id_async(localpart: str, session: AsyncSession) -> str:
         return localpart
     if localpart.startswith("@"):
         return f"{localpart.split(':', 1)[0]}:{domain}" if ":" not in localpart else localpart
-    return f"!{localpart}:{domain}"
+    return f"@{localpart}:{domain}"
 
 
 async def _matrix_bot_mxid_from_db(session: AsyncSession) -> str:

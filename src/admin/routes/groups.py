@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime as _dt
+from datetime import datetime
 from typing import Annotated
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -169,14 +170,17 @@ async def group_test_message(
 
     from src.matrix_send import room_send_with_retry
 
-    ts = _dt.now().strftime("%H:%M:%S")
+    tz_eff = await admin.effective_bot_timezone_for_admin(session)
+    ts = datetime.now(ZoneInfo(tz_eff)).strftime("%H:%M:%S")
     html = (
         f"<b>Тестовое сообщение группы</b><br>"
         f"Это тест от панели управления.<br>"
         f"Если вы это видите — подключение работает!<br>"
-        f"<small>Отправлено: {ts}</small>"
+        f"<small>Отправлено: {ts} ({tz_eff})</small>"
     )
-    text_plain = f"Тестовое сообщение группы\nЭто тест от панели управления.\nОтправлено: {ts}"
+    text_plain = (
+        f"Тестовое сообщение группы\nЭто тест от панели управления.\nОтправлено: {ts} ({tz_eff})"
+    )
 
     try:
         logger.info("group_test_message: syncing to find room %s...", room_id)

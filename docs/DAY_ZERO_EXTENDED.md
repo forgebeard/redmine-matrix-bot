@@ -80,7 +80,7 @@ flowchart TD
 
 | Действие | HTTP | Таблицы / эффект |
 |----------|------|------------------|
-| Список / создание / редактирование | GET/POST | **`bot_users`**: `redmine_id`, `room` (Matrix room id), JSONB `notify` / `versions` / `priorities`, часовой пояс, DND и т.д. |
+| Список / создание / редактирование | GET/POST | **`bot_users`**: `redmine_id`, `room` (MXID `@…` или полный `!room:server`), JSONB `notify` / `versions` / `priorities`, часовой пояс, DND и т.д. |
 | Доп. маршрут по версии | POST `.../version-routes/add` | **`user_version_routes`**: версия Redmine → `room_id` для этого пользователя |
 | Удаление маршрута версии | POST `.../version-routes/{id}/delete` | DELETE строки в **`user_version_routes`** |
 | Удаление пользователя | POST `.../delete`, bulk-delete | DELETE **`bot_users`**; FK удаляет **`user_version_routes`**; дополнительно вызывается очистка **`bot_issue_state`**, **`pending_notifications`**, **`bot_user_leases`** по `user_redmine_id` ([`user_runtime_cleanup`](../src/database/user_runtime_cleanup.py)) |
