@@ -1,0 +1,236 @@
+.block-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.block-editor__header {
+  margin-bottom: 0.75rem;
+}
+
+.block-editor__body {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 1.5rem;
+}
+
+.block-editor__main {
+  flex: 1 1 60%;
+  min-width: 0;
+}
+
+.block-editor__aside {
+  flex: 1 1 40%;
+  min-width: 0;
+  position: sticky;
+  top: 0.5rem;
+  align-self: flex-start;
+}
+
+@media (max-width: 899px) {
+  .block-editor__body {
+    flex-direction: column;
+  }
+
+  .block-editor__aside {
+    position: static;
+    align-self: stretch;
+    width: 100%;
+  }
+}
+
+.block-editor__tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 2px solid var(--border, #333);
+  margin-bottom: 1rem;
+}
+
+.block-editor__tab {
+  padding: 0.5rem 1.2rem;
+  cursor: pointer;
+  background: transparent;
+  border: none;
+  color: var(--text-muted, #888);
+  font-size: 0.95rem;
+}
+
+.block-editor__tab.active {
+  color: var(--text, #eee);
+  border-bottom: 2px solid var(--accent, #4a9eff);
+  margin-bottom: -2px;
+}
+
+.block-editor__list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.block-editor__block {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  background: var(--bg-secondary, #1a1a2e);
+  border: 1px solid var(--border, #333);
+  border-radius: 6px;
+  transition: opacity 0.2s;
+}
+
+.block-editor__block.disabled {
+  opacity: 0.55;
+}
+
+.block-editor__block--ghost {
+  opacity: 0.3;
+}
+
+.block-editor__handle {
+  cursor: grab;
+  user-select: none;
+  font-size: 1.1rem;
+  padding: 0 0.25rem;
+}
+
+.block-editor__toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  cursor: pointer;
+}
+
+.block-editor__desc {
+  flex: 1 1 100%;
+  margin-left: 2rem;
+  color: var(--text-muted, #888);
+  font-size: 0.85rem;
+}
+
+.block-editor__settings {
+  flex: 1 1 100%;
+  margin-top: 0.5rem;
+  margin-left: 2rem;
+}
+
+.block-editor__setting {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.3rem;
+}
+
+.block-editor__setting label {
+  min-width: 4rem;
+  font-size: 0.85rem;
+}
+
+.block-editor__setting select,
+.block-editor__setting input {
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  border: 1px solid var(--border, #333);
+  background: var(--bg, #0f0f23);
+  color: var(--text, #eee);
+}
+
+.emoji-custom {
+  width: 4rem;
+  text-align: center;
+}
+
+.block-editor__code-warning {
+  color: var(--warning, #f0ad4e);
+  font-size: 0.85rem;
+  margin-bottom: 0.5rem;
+}
+
+.block-editor__textarea {
+  width: 100%;
+  min-height: 200px;
+  font-family: ui-monospace, monospace;
+  font-size: 0.9rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border, #333);
+  border-radius: 4px;
+  background: var(--bg, #0f0f23);
+  color: var(--text, #eee);
+  resize: vertical;
+}
+
+.block-editor__preview {
+  border: 1px solid var(--border, #333);
+  border-radius: 4px;
+  padding: 1rem;
+  min-height: 80px;
+  background: var(--bg-secondary, #1a1a2e);
+  position: relative;
+}
+
+.block-editor__preview-heading {
+  margin: 0 0 0.75rem;
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: var(--text, #eee);
+}
+
+.block-editor__preview-content {
+  min-height: 2rem;
+}
+
+.block-editor__preview--loading {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.block-editor__preview--loading::after {
+  content: "…";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 1.5rem;
+}
+
+.block-editor__error {
+  color: var(--error, #e74c3c);
+  font-style: italic;
+}
+
+.block-editor__footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1rem;
+  margin-top: 1rem;
+}
+
+.block-editor__status {
+  flex: 1 1 12rem;
+  min-height: 1.25em;
+  font-size: 0.85rem;
+  color: var(--text-muted, #888);
+}
+
+.block-editor__status--error {
+  color: var(--error, #e74c3c);
+}
+
+.block-editor__status--ok {
+  color: var(--success, #2ecc71);
+}
+
+.block-editor__footer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.block-editor__variables {
+  color: var(--text-muted, #888);
+  font-size: 0.82rem;
+  margin-bottom: 0.5rem;
+}

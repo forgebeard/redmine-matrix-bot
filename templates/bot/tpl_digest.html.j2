@@ -1,7 +1,7 @@
 <h3>Накопленные уведомления</h3>
 <ul>
 {% for it in items %}
-  <li>#{{ it.issue_id }} — {{ it.subject }}
+  <li>#{{ it.issue_id | default('') }} — {{ it.subject | default('') }}
     ({% if it.events is defined and it.events %}{{ it.events | join(', ') }}{% elif it.event_type is defined %}{{ it.event_type }}{% else %}—{% endif %})</li>
 {% endfor %}
 </ul>

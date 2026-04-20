@@ -45,9 +45,13 @@ async def render_named_template(
     context: dict[str, Any],
     *,
     root: Path | None = None,
-) -> str:
+) -> tuple[str, str | None]:
     """
-    Рендер HTML: override из БД (``body_html``) или файл ``templates/bot/{name}.html.j2``.
+    Рендер HTML и опционально plain: override из БД (``body_html`` / ``body_plain``)
+    или файл ``templates/bot/{name}.html.j2``.
+
+    Возвращает ``(html, plain_or_none)``. ``None`` — в БД нет непустого ``body_plain``;
+    вызывающий подставляет свой fallback для Matrix ``body``.
     """
     if name not in _TEMPLATE_NAMES:
         raise ValueError(f"unknown template name: {name}")
@@ -55,6 +59,7 @@ async def render_named_template(
     env = _sandbox(r)
     row = await get_template_row(session, name)
     src = (row.body_html or "").strip() if row is not None else ""
+    plain_src = (row.body_plain or "").strip() if row is not None else ""
     if src:
         tpl = env.from_string(src)
     else:
@@ -63,7 +68,12 @@ async def render_named_template(
         except Exception as e:
             logger.error("template_file_missing name=%s: %s", name, e)
             raise
-    return tpl.render(**context)
+    html = tpl.render(**context)
+    plain_out: str | None = None
+    if plain_src:
+        tpl_plain = env.from_string(plain_src)
+        plain_out = tpl_plain.render(**context)
+    return html, plain_out
 
 
 def sandbox_accepts_context(name: str, context: dict[str, Any], root: Path | None = None) -> bool:

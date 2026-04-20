@@ -6,36 +6,41 @@ import json
 import logging
 from typing import Any
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from bot.config_state import CATALOGS
 from bot.logic import _cfg_for_room, describe_journal, issue_matches_cfg, should_notify
 from bot.routing import get_matching_route
-from bot.sender import REDMINE_URL, resolve_room
+from bot.sender import resolve_room
+from bot.template_context import build_issue_context
 from bot.template_loader import render_named_template
 from database.digest_repo import insert_digest
 from database.dlq_repo import enqueue_notification
 from matrix_send import room_send_with_retry
 from preferences import can_notify
-from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger("redmine_bot")
 
 
 def jinja_context_json_safe(ctx: dict[str, Any]) -> dict[str, Any]:
-    """Контекст для DLQ / retry: только JSON-сериализуемые типы (план A1)."""
-    out: dict[str, Any] = {}
-    for k, v in ctx.items():
-        key = str(k)
-        if v is None:
-            out[key] = None
-        elif isinstance(v, (str, int, float, bool)):
-            out[key] = v
-        elif isinstance(v, dict):
-            out[key] = jinja_context_json_safe(v)  # type: ignore[arg-type]
-        elif isinstance(v, list):
-            out[key] = [_json_safe_scalar(x) for x in v]
-        else:
-            out[key] = str(v)
-    return out
+    """Контекст для DLQ / retry: JSON-serializable; при сбое — shallow-sanitize (страховка)."""
+    try:
+        json.dumps(ctx, ensure_ascii=False)
+        return dict(ctx)
+    except (TypeError, ValueError) as e:
+        logger.warning("jinja_context not JSON-safe, sanitizing: %s", e)
+        out: dict[str, Any] = {}
+        for k, v in ctx.items():
+            key = str(k)
+            if v is None or isinstance(v, (str, int, float, bool)):
+                out[key] = v
+            elif isinstance(v, dict):
+                out[key] = jinja_context_json_safe(v)
+            elif isinstance(v, list):
+                out[key] = [_json_safe_scalar(x) for x in v]
+            else:
+                out[key] = str(v)
+        return out
 
 
 def _json_safe_scalar(v: Any) -> Any:
@@ -86,6 +91,8 @@ def former_assignee_redmine_id(journal: Any) -> int | None:
             continue
         if "old_value" not in d:
             continue
+        # Redmine REST API returns old_value/new_value as strings, even for numeric IDs.
+        # "" and "0" both mean "was unassigned" (no former assignee).
         old = d.get("old_value")
         if old is None:
             continue
@@ -184,10 +191,11 @@ async def journal_render_send_or_dlq(
     """
     content: dict[str, Any] | None = None
     try:
-        html = await render_named_template(session, template_name, jinja_context)
+        html, plain_tpl = await render_named_template(session, template_name, jinja_context)
+        matrix_plain = plain_tpl if plain_tpl is not None else plain_body
         content = {
             "msgtype": "m.text",
-            "body": plain_body,
+            "body": matrix_plain,
             "format": "org.matrix.custom.html",
             "formatted_body": html,
         }
@@ -258,16 +266,14 @@ async def handle_journal_entry(
     event_type = infer_event_type(journal)
     extra = describe_journal(journal, skip_status=False, catalogs=cats) or ""
 
-    issue_url = f"{REDMINE_URL.rstrip('/')}/issues/{issue.id}"
-    base_ctx = {
-        "issue_id": issue.id,
-        "issue_url": issue_url,
-        "subject": getattr(issue, "subject", "") or "",
-        "event_type": event_type,
-        "extra_text": extra,
-        "title": "Обновление задачи",
-        "emoji": "📝",
-    }
+    base_ctx = build_issue_context(
+        issue,
+        cats,
+        event_type=event_type,
+        extra_text=extra,
+        title="Обновление задачи",
+        emoji="📝",
+    )
 
     try:
         tpl_name = "tpl_new_issue" if len(list(getattr(issue, "journals", None) or [])) == 1 else "tpl_task_change"

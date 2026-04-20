@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import re
@@ -18,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from admin.env_manager import update_env_file_with_lock
 from database.models import AppSecret, CycleSettings
+from database.notification_template_repo import NOTIFICATION_TEMPLATE_LABELS
 from database.session import get_session
 from redmine_cache import check_redmine_access as check_redmine_access_cached
 from security import decrypt_secret, encrypt_secret, load_master_key
@@ -270,6 +272,8 @@ async def onboarding_page(request: Request, session: AsyncSession = Depends(get_
         except Exception:
             secrets_masked[row.name] = "••••••••"
 
+    from admin.template_blocks import BLOCK_EDITOR_TEMPLATES, registry_json_objects
+
     _notify_catalog, versions_catalog = await admin._load_catalogs(session)
     statuses_catalog = await admin._load_statuses_catalog(session)
     csrf_token, _ = admin._ensure_csrf(request)
@@ -280,6 +284,13 @@ async def onboarding_page(request: Request, session: AsyncSession = Depends(get_
     tz_all = admin._standard_timezone_options()
     tz_labels = admin._timezone_labels(tz_all)
     current_tz = await admin.effective_bot_timezone_for_admin(session)
+
+    block_editor_bootstrap = {
+        "registry": registry_json_objects(),
+        "editor_template_names": sorted(BLOCK_EDITOR_TEMPLATES),
+        "template_display_names": NOTIFICATION_TEMPLATE_LABELS,
+    }
+    block_editor_bootstrap_json = json.dumps(block_editor_bootstrap, ensure_ascii=False)
 
     return admin.templates.TemplateResponse(
         request,
@@ -295,6 +306,7 @@ async def onboarding_page(request: Request, session: AsyncSession = Depends(get_
             "timezone_all_options": tz_all,
             "timezone_labels": tz_labels,
             "service_timezone": current_tz,
+            "block_editor_bootstrap_json": block_editor_bootstrap_json,
         },
     )
 

@@ -8,11 +8,17 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from matrix_send import room_send_with_retry
 from bot.sender import resolve_room
+
+# tpl_digest — отдельная модель контекста (только ``items``), не ``build_issue_context``.
 from bot.template_loader import render_named_template
-from database.digest_repo import delete_digest_rows, list_digest_rows_for_users, user_ids_having_digests
+from database.digest_repo import (
+    delete_digest_rows,
+    list_digest_rows_for_users,
+    user_ids_having_digests,
+)
 from database.dlq_repo import enqueue_notification
+from matrix_send import room_send_with_retry
 
 logger = logging.getLogger("redmine_bot")
 
@@ -60,8 +66,8 @@ async def drain_pending_digests(
         items = list(by_issue.values())
         content: dict[str, Any] = {}
         try:
-            html = await render_named_template(session, "tpl_digest", {"items": items})
-            plain = _plain_from_html(html)
+            html, plain_tpl = await render_named_template(session, "tpl_digest", {"items": items})
+            plain = plain_tpl if plain_tpl is not None else _plain_from_html(html)
             content = {
                 "msgtype": "m.text",
                 "body": plain,

@@ -286,20 +286,10 @@
 
     <!-- Вкладка: Уведомления -->
     <div class="tab-content" id="tab-notifications">
-      <div class="section-header section-header--action">
-        <h2>Настройки уведомлений</h2>
-        <div class="head-line"></div>
-        <div class="section-actions">
-          <button type="button" class="btn btn-primary" id="notifications-save-btn">Сохранить</button>
-        </div>
-      </div>
+      <script type="application/json" id="block-editor-bootstrap">{{ block_editor_bootstrap_json | safe }}</script>
       <p id="notifications-save-status" class="muted form-status" aria-live="polite"></p>
       <section class="service-bubble" id="journal-template-v2-root">
-        <div class="card-title">Шаблоны журнального движка (Jinja2, v2)</div>
-        <p class="muted">
-          Файлы по умолчанию в репозитории <code>templates/bot/tpl_*.html.j2</code>.
-          Пустой override в БД = использовать файл. Редактирование — только для администратора.
-        </p>
+        <div class="card-title">Шаблоны уведомлений</div>
         <p id="tpl-v2-status" class="muted form-status" aria-live="polite"></p>
         <div id="tpl-v2-fields"></div>
       </section>
@@ -308,9 +298,12 @@
   </form>
 </div>
 
+<link rel="stylesheet" href="/static/admin/css/template_block_editor.css?v={{ asset_version() }}"/>
+<script src="/static/admin/vendor/Sortable.min.js?v={{ asset_version() }}"></script>
 <script src="/static/admin/js/toast.js?v={{ asset_version() }}"></script>
 <script src="/static/admin/js/toggle_visibility.js?v={{ asset_version() }}"></script>
 <script src="/static/admin/js/catalog_editor.js?v={{ asset_version() }}"></script>
+<script src="/static/admin/js/template_block_editor.js?v={{ asset_version() }}"></script>
 <script src="/static/admin/js/onboarding.js?v={{ asset_version() }}"></script>
 <script src="/static/admin/js/user_parse.js?v={{ asset_version() }}"></script>
 <script src="/static/admin/js/catalog_statuses.js?v={{ asset_version() }}"></script>

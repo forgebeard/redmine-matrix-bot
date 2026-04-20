@@ -1,2 +1,2 @@
 <p><em>Предпросмотр шаблона</em></p>
-<p>Задача <a href="{{ issue_url }}">#{{ issue_id }}</a>: {{ subject }}</p>
+<p>Задача <a href="{{ issue_url | default('') }}">#{{ issue_id | default('') }}</a>: {{ subject | default('') }}</p>

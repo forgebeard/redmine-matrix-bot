@@ -16,6 +16,17 @@ TEMPLATE_NAMES = (
     "tpl_dry_run",
 )
 
+# Подписи в админке (заголовки карточек, тосты); технический ключ — ``name`` в API.
+NOTIFICATION_TEMPLATE_LABELS: dict[str, str] = {
+    "tpl_new_issue": "Новая задача",
+    "tpl_task_change": "Изменение задачи",
+    "tpl_reminder": "Напоминание",
+    "tpl_digest": "Дайджест",
+    "tpl_dry_run": "Предпросмотр",
+}
+
+assert set(TEMPLATE_NAMES) == set(NOTIFICATION_TEMPLATE_LABELS.keys())
+
 
 async def get_template_row(session: AsyncSession, name: str) -> NotificationTemplate | None:
     return await session.scalar(select(NotificationTemplate).where(NotificationTemplate.name == name))

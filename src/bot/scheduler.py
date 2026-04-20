@@ -579,10 +579,11 @@ async def retry_dlq_notifications(
                     tpl = str(p.get("template_name") or "tpl_task_change")
                     ctx = p.get("jinja_context") if isinstance(p.get("jinja_context"), dict) else {}
                     plain = str(p.get("plain_body") or f"#{notif.issue_id}")
-                    html = await render_named_template(session, tpl, ctx)
+                    html, plain_tpl = await render_named_template(session, tpl, ctx)
+                    matrix_plain = plain_tpl if plain_tpl is not None else plain
                     content = {
                         "msgtype": "m.text",
-                        "body": plain,
+                        "body": matrix_plain,
                         "format": "org.matrix.custom.html",
                         "formatted_body": html,
                     }

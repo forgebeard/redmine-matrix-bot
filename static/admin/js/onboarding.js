@@ -298,6 +298,16 @@
 
     function loadV2() {
       statusEl.textContent = "Загрузка шаблонов v2…";
+      var editorNames = {};
+      var bootEl = document.getElementById("block-editor-bootstrap");
+      if (bootEl && bootEl.textContent) {
+        try {
+          var bt = JSON.parse(bootEl.textContent);
+          (bt.editor_template_names || []).forEach(function (n) {
+            editorNames[n] = true;
+          });
+        } catch (ignore) {}
+      }
       fetch("/api/bot/notification-templates", {
         method: "GET",
         credentials: "same-origin",
@@ -306,59 +316,96 @@
         if (!resp.ok) throw new Error("load_failed");
         return resp.json();
       }).then(function (data) {
+        root.querySelectorAll(".block-editor-root").forEach(function (el) {
+          if (el._blockEditor && typeof el._blockEditor.destroy === "function") {
+            el._blockEditor.destroy();
+          }
+          el._blockEditor = null;
+        });
         root.innerHTML = "";
         (data.templates || []).forEach(function (tpl) {
+          var displayLabel = tpl.display_name || tpl.name;
           var wrap = document.createElement("div");
           wrap.className = "field";
           var title = document.createElement("div");
           title.className = "card-title";
           title.style.marginTop = "0.5rem";
-          title.textContent = tpl.name;
+          title.textContent = displayLabel;
           wrap.appendChild(title);
-          var lab = document.createElement("label");
-          lab.textContent = "Override HTML (пусто = файл по умолчанию)";
-          wrap.appendChild(lab);
-          var ta = document.createElement("textarea");
-          ta.className = "tpl-v2-html";
-          ta.setAttribute("data-name", tpl.name);
-          ta.rows = 6;
-          ta.value = (tpl.override_html != null && tpl.override_html !== "")
-            ? tpl.override_html
-            : (tpl.default_html || "");
-          wrap.appendChild(ta);
-          var bar = document.createElement("div");
-          bar.className = "db-grid";
-          bar.style.marginTop = "0.5rem";
-          ["Сохранить", "Сбросить", "Предпросмотр"].forEach(function (label, idx) {
-            var b = document.createElement("button");
-            b.type = "button";
-            b.textContent = label;
-            b.className = idx === 0 ? "btn btn-primary" : "btn btn-ghost";
-            if (idx === 0) b.classList.add("tpl-v2-save");
-            if (idx === 1) b.classList.add("tpl-v2-reset");
-            if (idx === 2) b.classList.add("tpl-v2-preview");
-            b.setAttribute("data-name", tpl.name);
-            bar.appendChild(b);
-          });
-          wrap.appendChild(bar);
-          var pre = document.createElement("pre");
-          pre.className = "tpl-v2-preview-out muted";
-          pre.setAttribute("data-name", tpl.name);
-          pre.style.whiteSpace = "pre-wrap";
-          pre.style.maxHeight = "12rem";
-          pre.style.overflow = "auto";
-          wrap.appendChild(pre);
+          if (editorNames[tpl.name]) {
+            var bed = document.createElement("div");
+            bed.className = "block-editor-root";
+            bed.setAttribute("data-template-name", tpl.name);
+            wrap.appendChild(bed);
+            if (typeof window.BlockEditor === "function") {
+              var editor = new window.BlockEditor(bed, tpl.name);
+              bed._blockEditor = editor;
+              editor.init().catch(function (err) {
+                console.error("BlockEditor init failed", err);
+                bed.innerHTML = "<p class=\"error\">Не удалось загрузить конструктор</p>";
+              });
+            } else {
+              bed.innerHTML = "<p class=\"error\">Конструктор блоков не загружен</p>";
+            }
+          } else {
+            var lab = document.createElement("label");
+            wrap.appendChild(lab);
+            var ta = document.createElement("textarea");
+            ta.className = "tpl-v2-html";
+            ta.setAttribute("data-name", tpl.name);
+            ta.rows = 6;
+            ta.value = (tpl.override_html != null && tpl.override_html !== "")
+              ? tpl.override_html
+              : (tpl.default_html || "");
+            wrap.appendChild(ta);
+            var footer = document.createElement("div");
+            footer.className = "block-editor__footer";
+            footer.style.marginTop = "0.5rem";
+            var st = document.createElement("span");
+            st.className = "block-editor__status";
+            footer.appendChild(st);
+            var actions = document.createElement("div");
+            actions.className = "block-editor__footer-actions";
+            ["Сохранить", "Сбросить", "Предпросмотр"].forEach(function (label, idx) {
+              var b = document.createElement("button");
+              b.type = "button";
+              b.textContent = label;
+              b.className = idx === 0 ? "btn btn-primary" : "btn btn-ghost";
+              if (idx === 0) {
+                b.classList.add("tpl-v2-save");
+                b.setAttribute("data-action", "save");
+              }
+              if (idx === 1) {
+                b.classList.add("tpl-v2-reset");
+                b.setAttribute("data-action", "reset");
+              }
+              if (idx === 2) b.classList.add("tpl-v2-preview");
+              b.setAttribute("data-name", tpl.name);
+              b.setAttribute("data-display-label", displayLabel);
+              actions.appendChild(b);
+            });
+            footer.appendChild(actions);
+            wrap.appendChild(footer);
+            var pre = document.createElement("pre");
+            pre.className = "tpl-v2-preview-out muted";
+            pre.setAttribute("data-name", tpl.name);
+            pre.style.whiteSpace = "pre-wrap";
+            pre.style.maxHeight = "12rem";
+            pre.style.overflow = "auto";
+            wrap.appendChild(pre);
+          }
           root.appendChild(wrap);
         });
         root.querySelectorAll(".tpl-v2-save").forEach(function (btn) {
           btn.addEventListener("click", function () {
             var name = btn.getAttribute("data-name");
+            var label = btn.getAttribute("data-display-label") || name;
             var ta = root.querySelector('.tpl-v2-html[data-name="' + name + '"]');
             var fd = new FormData();
             fd.append("csrf_token", csrfToken());
             fd.append("body_html", ta ? ta.value : "");
             fd.append("body_plain", "");
-            statusEl.textContent = "Сохранение " + name + "…";
+            statusEl.textContent = "Сохранение " + label + "…";
             fetch("/api/bot/notification-templates/" + encodeURIComponent(name), {
               method: "PUT",
               body: fd,
@@ -366,16 +413,17 @@
               headers: { Accept: "application/json" }
             }).then(function (resp) {
               if (!resp.ok) throw new Error("save_failed");
-              statusEl.textContent = "Сохранено: " + name;
-              showToast("Шаблон " + name + " сохранён", false);
+              statusEl.textContent = "Сохранено: " + label;
+              showToast("Шаблон " + label + " сохранён", false);
             }).catch(function () {
-              statusEl.textContent = "Ошибка сохранения " + name;
+              statusEl.textContent = "Ошибка сохранения " + label;
             });
           });
         });
         root.querySelectorAll(".tpl-v2-reset").forEach(function (btn) {
           btn.addEventListener("click", function () {
             var name = btn.getAttribute("data-name");
+            var label = btn.getAttribute("data-display-label") || name;
             var fd = new FormData();
             fd.append("csrf_token", csrfToken());
             fetch("/api/bot/notification-templates/" + encodeURIComponent(name) + "/reset", {
@@ -387,7 +435,7 @@
               if (!resp.ok) throw new Error("reset_failed");
               loadV2();
             }).catch(function () {
-              statusEl.textContent = "Ошибка сброса " + name;
+              statusEl.textContent = "Ошибка сброса " + label;
             });
           });
         });

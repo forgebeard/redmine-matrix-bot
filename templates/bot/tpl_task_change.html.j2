@@ -1,3 +1,3 @@
-<p><strong>{{ emoji | default('📝') }}</strong> {{ title | default('Изменение') }} <a href="{{ issue_url }}">#{{ issue_id }}</a></p>
-<p>{{ subject }}</p>
-<p>Тип: {{ event_type }}{% if extra_text %} — {{ extra_text }}{% endif %}</p>
+<p><strong>{{ emoji | default('📝') }}</strong> {{ title | default('Изменение') }} <a href="{{ issue_url | default('') }}">#{{ issue_id | default('') }}</a></p>
+<p>{{ subject | default('') }}</p>
+<p>Тип: {{ event_type | default('') }}{% if extra_text | default('') %} — {{ extra_text }}{% endif %}</p>

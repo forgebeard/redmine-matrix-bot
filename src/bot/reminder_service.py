@@ -14,7 +14,7 @@ from bot.journal_handlers import journal_render_send_or_dlq
 from bot.journal_pipeline import reload_issue_with_journals
 from bot.logic import _cfg_for_room, issue_matches_cfg, should_notify
 from bot.routing import get_matching_route
-from bot.sender import REDMINE_URL
+from bot.template_context import build_issue_context
 from database.digest_repo import insert_digest
 from database.models import BotIssueState
 from preferences import can_notify
@@ -173,15 +173,14 @@ async def process_reminders(
             st.reminder_count = 0
             continue
 
-        issue_url = f"{REDMINE_URL.rstrip('/')}/issues/{issue.id}"
-        base_ctx: dict[str, Any] = {
-            "issue_id": issue.id,
-            "issue_url": issue_url,
-            "subject": getattr(issue, "subject", "") or "",
-            "reminder_text": "Задача без движения",
-            "title": "Напоминание",
-            "emoji": "⏰",
-        }
+        # tpl_reminder: полный issue-контекст + поля напоминания (не путать с tpl_digest — отдельная модель).
+        base_ctx = build_issue_context(
+            issue,
+            catalogs,
+            reminder_text="Задача без движения",
+            title="Напоминание",
+            emoji="⏰",
+        )
         plain = f"#{issue.id} {base_ctx['subject']}: напоминание"
 
         group_due = st.group_reminder_due_at is not None and st.group_reminder_due_at <= now_u
