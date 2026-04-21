@@ -1,8 +1,11 @@
-<p><strong>{{ emoji | default('') }}</strong> Новая задача <a href="{{ issue_url | default('') }}">#{{ issue_id | default('') }}</a></p>
-<p><strong>{{ subject | default('') }}</strong></p>
-<p>Проект: {{ project_name | default('—') }} · Статус: {{ status | default('') }} · Приоритет: {{ priority | default('') }}</p>
-<p>Исполнитель: {{ assignee_name | default('—') }}{% if version | default('') %} · Версия: {{ version }}{% endif %}{% if due_date | default('') %} · Дедлайн: {{ due_date }}{% endif %}</p>
-{% if description_excerpt | default('') %}
-<blockquote>{{ description_excerpt }}</blockquote>
-{% endif %}
-<p><a href="{{ issue_url | default('') }}">Открыть задачу</a></p>
+<blockquote>
+Новая задача<br>
+#{{ issue_id | default('') }}{% if subject | default('') %} — {{ subject }}{% endif %}<br>
+<br>
+Проект: {{ project_name | default('—') }}<br>
+Версия: {{ version_line | default(version | default('—')) }}<br>
+Статус: {{ status_line | default(status | default('—')) }}<br>
+Приоритет: {{ priority_line | default(priority | default('—')) }}<br>
+<br>
+<a href="{{ issue_url | default('') }}">Открыть задачу</a>
+</blockquote>

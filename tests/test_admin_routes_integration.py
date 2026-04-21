@@ -33,6 +33,31 @@ def _unique_room(prefix: str = "pytest") -> str:
     return f"!{prefix}-{uuid4().hex[:8]}:server"
 
 
+class _FakeRoom:
+    def __init__(self) -> None:
+        self.users = {}
+
+
+class _FakeMatrixClient:
+    def __init__(self, room_ids: list[str] | None = None) -> None:
+        self.homeserver = "https://messenger.red-soft.ru"
+        self.user_id = "@bot:messenger.red-soft.ru"
+        self.rooms = {rid: _FakeRoom() for rid in (room_ids or [])}
+
+    async def close(self) -> None:
+        return None
+
+    async def join(self, room_id: str):
+        self.rooms.setdefault(room_id, _FakeRoom())
+        return type("JoinResponse", (), {})()
+
+    async def room_create(self, invite: list[str], is_direct: bool):
+        _ = (invite, is_direct)
+        rid = f"!dm-{uuid4().hex[:8]}:server"
+        self.rooms.setdefault(rid, _FakeRoom())
+        return type("RoomCreateResponse", (), {"room_id": rid})()
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # Users — полный CRUD + валидация
 # ═══════════════════════════════════════════════════════════════════════════
@@ -776,6 +801,16 @@ class TestSettingsIntegration:
         assert "Справочник" in r.text
         assert "Уведомления" in r.text
 
+    def test_onboarding_notifications_is_code_only(self, client: TestClient):
+        r = client.get("/onboarding")
+        assert r.status_code == 200
+        assert "template_block_editor.js" not in r.text
+        assert "template_block_editor.css" not in r.text
+        assert "Sortable.min.js" not in r.text
+        assert 'id="tpl-v2-fields"' in r.text
+        assert "static/admin/js/onboarding.js" in r.text
+        assert "Обновить предпросмотр" not in r.text
+
     def test_onboarding_save_empty_redirects(self, client: TestClient):
         """POST /onboarding/save с пустыми значениями перенаправляет."""
         token = _get_csrf(client)
@@ -793,6 +828,44 @@ class TestSettingsIntegration:
         )
         assert resp.status_code == 303
 
+    @pytest.mark.asyncio
+    async def test_onboarding_save_syncs_portal_base_url_from_redmine(self, client: TestClient):
+        token = _get_csrf(client)
+        redmine_url = "https://support.red-soft.ru/"
+        resp = client.post(
+            "/onboarding/save",
+            data={
+                "csrf_token": token,
+                "secret_REDMINE_URL": redmine_url,
+                "secret_REDMINE_API_KEY": "",
+                "secret_MATRIX_HOMESERVER": "",
+                "secret_MATRIX_USER_ID": "",
+                "secret_MATRIX_ACCESS_TOKEN": "",
+            },
+            follow_redirects=False,
+        )
+        assert resp.status_code == 303
+
+        from database.models import AppSecret
+        from database.session import get_session_factory
+        from security import decrypt_secret, load_master_key
+
+        factory = get_session_factory()
+        async with factory() as session:
+            rows = (
+                await session.execute(
+                    select(AppSecret).where(
+                        AppSecret.name.in_(["REDMINE_URL", "PORTAL_BASE_URL"])
+                    )
+                )
+            ).scalars().all()
+            vals = {
+                row.name: decrypt_secret(row.ciphertext, row.nonce, load_master_key())
+                for row in rows
+            }
+        assert vals["REDMINE_URL"] == "https://support.red-soft.ru"
+        assert vals["PORTAL_BASE_URL"] == "https://support.red-soft.ru"
+
     def test_catalog_save_notify(self, client: TestClient):
         """Сохранение справочника уведомлений."""
         token = _get_csrf(client)
@@ -806,6 +879,124 @@ class TestSettingsIntegration:
             follow_redirects=False,
         )
         assert resp.status_code in (200, 303, 403)
+
+
+class TestTemplateDrivenTestMessageRoutes:
+    @pytest.fixture(autouse=True)
+    def _check_db(self, client: TestClient):
+        db_url = os.getenv("DATABASE_URL", "")
+        if not db_url or not db_url.startswith("postgresql://"):
+            pytest.skip("Требует Postgres (DATABASE_URL)")
+        _setup_and_login_admin(client)
+
+    def _create_user_with_room(self, client: TestClient) -> tuple[int, str]:
+        token = _get_csrf(client)
+        rid = _unique_redmine_id(10_000)
+        room = _unique_room("testmsg")
+        resp = client.post(
+            "/users",
+            data={
+                "redmine_id": str(rid),
+                "display_name": "template test user",
+                "room": room,
+                "notify_preset": "all",
+                "version_preset": "all",
+                "csrf_token": token,
+            },
+            follow_redirects=False,
+        )
+        assert resp.status_code == 303
+        loc = resp.headers.get("location", "")
+        qs = parse_qs(urlparse(loc).query)
+        assert "highlight_user_id" in qs
+        return int(qs["highlight_user_id"][0]), room
+
+    def test_users_test_message_uses_tpl_test_message(self, client: TestClient, monkeypatch):
+        uid, room_id = self._create_user_with_room(client)
+        fake_client = _FakeMatrixClient([room_id])
+        sent: dict[str, object] = {}
+
+        async def _fake_get_matrix_client(_session):
+            return fake_client
+
+        async def _fake_sync(_client):
+            return True
+
+        async def _fake_send(_client, _room_id, content, **_kwargs):
+            sent["room_id"] = _room_id
+            sent["content"] = content
+
+        async def _fake_render(_session, name, context, *, root=None):
+            _ = root
+            assert name == "tpl_test_message"
+            assert context["scope"] == "user"
+            return "<b>Rendered user test</b>", "Rendered plain test"
+
+        import admin.main as admin_main  # noqa: PLC0415
+        import admin.routes.users as users_routes  # noqa: PLC0415
+        import src.matrix_send as matrix_send  # noqa: PLC0415
+
+        monkeypatch.setattr(admin_main, "_get_matrix_client", _fake_get_matrix_client)
+        monkeypatch.setattr(admin_main, "_sync_matrix_client", _fake_sync)
+        monkeypatch.setattr(matrix_send, "room_send_with_retry", _fake_send)
+        monkeypatch.setattr(users_routes, "render_named_template", _fake_render)
+
+        token = _get_csrf(client)
+        resp = client.post(
+            "/users/test-message",
+            data={"user_id": str(uid)},
+            headers={"Accept": "application/json", "X-CSRF-Token": token},
+        )
+        assert resp.status_code == 200
+        assert resp.json().get("ok") is True
+        assert sent["room_id"] == room_id
+        content = sent["content"]
+        assert isinstance(content, dict)
+        assert content["formatted_body"] == "<b>Rendered user test</b>"
+        assert content["body"] == "Rendered plain test"
+
+    def test_groups_test_message_uses_tpl_test_message(self, client: TestClient, monkeypatch):
+        room_id = _unique_room("group-tpl")
+        fake_client = _FakeMatrixClient([room_id])
+        sent: dict[str, object] = {}
+
+        async def _fake_get_matrix_client(_session):
+            return fake_client
+
+        async def _fake_sync(_client):
+            return True
+
+        async def _fake_send(_client, _room_id, content, **_kwargs):
+            sent["room_id"] = _room_id
+            sent["content"] = content
+
+        async def _fake_render(_session, name, context, *, root=None):
+            _ = root
+            assert name == "tpl_test_message"
+            assert context["scope"] == "group"
+            return "<b>Rendered group test</b>", "Rendered plain group"
+
+        import admin.main as admin_main  # noqa: PLC0415
+        import admin.routes.groups as groups_routes  # noqa: PLC0415
+        import src.matrix_send as matrix_send  # noqa: PLC0415
+
+        monkeypatch.setattr(admin_main, "_get_matrix_client", _fake_get_matrix_client)
+        monkeypatch.setattr(admin_main, "_sync_matrix_client", _fake_sync)
+        monkeypatch.setattr(matrix_send, "room_send_with_retry", _fake_send)
+        monkeypatch.setattr(groups_routes, "render_named_template", _fake_render)
+
+        token = _get_csrf(client)
+        resp = client.post(
+            "/groups/test-message",
+            data={"room_id": room_id},
+            headers={"Accept": "application/json", "X-CSRF-Token": token},
+        )
+        assert resp.status_code == 200
+        assert resp.json().get("ok") is True
+        content = sent["content"]
+        assert isinstance(content, dict)
+        assert content["formatted_body"] == "<b>Rendered group test</b>"
+        assert content["body"] == "Rendered plain group"
 
 
 # ═══════════════════════════════════════════════════════════════════════════

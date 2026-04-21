@@ -138,9 +138,13 @@ python -m pytest tests/e2e/ -v --tb=short
 
 | Переменная | По умолчанию | Описание |
 |-----------|-------------|----------|
+| `PORTAL_BASE_URL` | `REDMINE_URL` | Базовый URL портала для ссылок на задачу; если пусто, используется `REDMINE_URL` |
+| `POLLING_INTERVAL_SEC` | `90` | Каноничный интервал опроса (сек) |
 | `CHECK_INTERVAL` | `90` | Интервал опроса Redmine (сек) |
 | `REMINDER_AFTER` | `3600` | Напоминание после (сек) |
 | `GROUP_REPEAT_SECONDS` | `1800` | Повтор уведомлений в группу (сек) |
+| `DEDUP_TTL_HOURS` | `24` | TTL ключей дедупликации (часы) |
+| `SUBJECT_MAX_LEN` | `180` | Максимальная длина темы задачи в карточке |
 | `MATRIX_RETRY_MAX_ATTEMPTS` | `3` | Попытки отправки в Matrix |
 | `MATRIX_RETRY_BASE_DELAY_SEC` | `1.0` | Базовая задержка retry (сек) |
 | `BOT_LEASE_TTL_SECONDS` | `300` | Lease-координация (сек) |
@@ -148,6 +152,23 @@ python -m pytest tests/e2e/ -v --tb=short
 | `CONFIG_POLL_INTERVAL_SEC` | `30` | Интервал повторной попытки, пока при старте не готовы секреты в БД (сек) |
 | `BOT_HOT_RELOAD` | `1` | Периодически подгружать конфиг из БД без рестарта (`0` — выкл.) |
 | `BOT_HOT_RELOAD_INTERVAL_SEC` | `45` | Интервал hot reload, секунды (15–3600) |
+| `CONTRACT_AUDIT_VERBOSE` | `0` | Подробные per-issue логи `journal_contract_check` (`1` — включить) |
+| `CONTRACT_AUDIT_SAMPLE_LIMIT` | `10` | Лимит примеров issue_id в summary логе contract-check |
+
+В onboarding задаётся только `REDMINE_URL`; `PORTAL_BASE_URL` синхронизируется автоматически с ним.
+
+## Редактор шаблонов уведомлений
+
+Во вкладке `Уведомления` используется единый **code-only** UX для всех шаблонов `tpl_*`:
+
+- один редактор кода + live preview Matrix;
+- автопредпросмотр с debounce (`~400ms`) и кнопка `Обновить предпросмотр` как fallback;
+- `Сохранить` пишет `custom override` в БД (`notification_templates.body_html`);
+- `Сбросить` удаляет override и возвращает файловый default из `templates/bot/tpl_*.html.j2`.
+
+Block-editor endpoints удалены из runtime API. Контракт удаления: `404 Not Found` для
+`/api/bot/notification-templates/compile-blocks`, `/{name}/decompose`,
+`/{name}/decompose-body`, `/block-registry`.
 
 ## Перезапуск бота после изменений в панели
 
@@ -166,6 +187,8 @@ docker compose restart bot
 | [docs/DEPLOYMENT_GUIDE.md](docs/DEPLOYMENT_GUIDE.md) | Развёртывание на сервере (RHEL/AlmaLinux/Rocky) |
 | [docs/ADMINISTRATOR_GUIDE.md](docs/ADMINISTRATOR_GUIDE.md) | Панель администратора, первый вход, troubleshooting |
 | [docs/AUDIT_LOGGING.md](docs/AUDIT_LOGGING.md) | Логирование и аудит действий в панели |
+| [docs/MATRIX_NOTIFICATION_V5.md](docs/MATRIX_NOTIFICATION_V5.md) | Формат карточки v5, дедупликация, txn_id, retry |
+| [docs/LOGGING_DUPLICATION_DIAGNOSIS_2026-04-21.md](docs/LOGGING_DUPLICATION_DIAGNOSIS_2026-04-21.md) | Диагностика и контроль дублей логов |
 | [docs/secrets-storage.md](docs/secrets-storage.md) | Хранение секретов и шифрование |
 | [docs/rollback-runbook.md](docs/rollback-runbook.md) | Аварийный откат |
 | [docs/ui-smoke-checklist.md](docs/ui-smoke-checklist.md) | Smoke-чеклист UI |

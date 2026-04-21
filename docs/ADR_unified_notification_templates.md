@@ -25,3 +25,16 @@
 ## Дата
 
 Введено в рамках плана унификации шаблонов (см. `.cursor/plans/unify_notifications_tpl_*.plan.md`). Режим `USE_LEGACY_TEMPLATES` удалён после стабилизации tpl-only пути.
+
+## Update (v5 cutover)
+
+- Для `issue_updated` и `status_change` используется каноничный v5-формат карточки в `tpl_task_change`.
+- Legacy путь обновлений в `processor` исключён из боевого контура; рабочий контур — журналный движок.
+- Plain fallback для v5-карточки формируется кодом (`| ` префикс по строкам), не отдельным `.plain.j2`.
+
+## Update (admin editor: code-only)
+
+- В админке удалён block-editor runtime-path: вкладка `Уведомления` использует единый редактор кода с live-preview.
+- Для preview сохранён единый endpoint `POST /api/bot/notification-templates/preview` (debounce + защита от гонок в UI).
+- Удалённые block-endpoints (`/compile-blocks`, `/{name}/decompose`, `/{name}/decompose-body`, `/block-registry`) возвращают `404`.
+- Миграция БД не требуется: используется прежняя модель `notification_templates.body_html` (default из файлов + custom override в БД).

@@ -5,8 +5,9 @@
 ## Принятые продуктовые решения
 
 1. **`tpl_digest`** — отдельная модель контекста: только `{"items": [...]}`. Не прогоняется через `build_issue_context` (нет N запросов к Redmine, не раздуваем digest-очередь). Поля элементов согласованы с [`tpl_digest.html.j2`](../templates/bot/tpl_digest.html.j2) (`issue_id`, `subject`, `events` или `event_type`).
-2. **`tpl_dry_run`** — не часть прод-пайплайна бота; остаётся в API/списке шаблонов для ручной проверки. Mock в админке минимальный (`issue_id`, `issue_url`, `subject`), не унифицируется с `build_issue_context`.
-3. **`sandbox_accepts_context`** в [`template_loader.py`](../src/bot/template_loader.py) — вынесено в бэклог: сейчас парсит только дефолтный файл с диска, не override из БД.
+2. **`tpl_test_message`** — отдельный шаблон для тестовой отправки из админки (`/users/test-message`, `/groups/test-message`), не смешивается с рабочими event-шаблонами.
+3. **`tpl_dry_run`** — выведен из runtime-контракта (удалён из реестра, API и шаблонов); любые старые override-строки считаются orphan и очищаются миграцией.
+4. **`sandbox_accepts_context`** в [`template_loader.py`](../src/bot/template_loader.py) — вынесено в бэклог: сейчас парсит только дефолтный файл с диска, не override из БД.
 
 ## Вызовы `render_named_template`
 
@@ -26,7 +27,7 @@
 | `tpl_new_issue` | **тот же dict**, что и для `tpl_task_change` | + `status`, `priority`, `version` | **Не хватало** `status`, `priority`, `version` — исправлено через `build_issue_context` |
 | `tpl_reminder` | частичный набор + `reminder_text` | `issue_url`, `issue_id`, `subject`, `reminder_text` | Лишние ключи не мешают; полный контекст добавлен для согласованности |
 | `tpl_digest` | `items[]` с `issue_id`, `subject`, `events` | цикл по `items` | Отдельный контракт; без `build_issue_context` на корне |
-| `tpl_dry_run` | только в mock админки | `issue_url`, `issue_id`, `subject` | Не в прод-пайплайне |
+| `tpl_test_message` | админский test-message роут | `title`, `message`, `sent_at`, `timezone`, `scope` | Не в event-пайплайне бота |
 
 ## Контракт `render_named_template` (после рефакторинга)
 

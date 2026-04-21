@@ -6,3 +6,17 @@
 {% if due_date | default('') %}<p>Дедлайн: {{ due_date }}</p>{% endif %}
 {% if reminder_text | default('') %}<p>{{ reminder_text }}</p>{% endif %}
 <p><a href="{{ issue_url | default('') }}">Открыть задачу</a></p>
+
+<blockquote>
+Напоминание<br>
+#{{ issue_id | default('') }}{% if subject | default('') %} — {{ subject }}{% endif %}<br>
+<br>
+Проект: {{ project_name | default('—') }}<br>
+Версия: {{ version_line | default(version | default('—')) }}<br>
+Статус: {{ status_line | default(status | default('—')) }}<br>
+Приоритет: {{ priority_line | default(priority | default('—')) }}<br>
+Исполнитель: {{ assignee_line | default(assignee_name | default('—')) }}<br>
+<br>
+<a href="{{ issue_url | default('') }}">Открыть задачу</a>
+</blockquote>
+

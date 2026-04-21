@@ -5,7 +5,8 @@
 нужно при старте, чтобы не падать на кривом USERS в .env.
 """
 
-from config import should_notify, validate_users
+import config
+from config import should_notify, validate_required_env, validate_users
 
 # ═══════════════════════════════════════════════════════════════
 # validate_users
@@ -195,3 +196,21 @@ class TestEnvPlaceholderHints:
         from config import env_placeholder_hints
 
         assert any("MATRIX_ACCESS_TOKEN" in h for h in env_placeholder_hints())
+
+
+class TestV5Config:
+    def test_v5_defaults(self):
+        assert config.POLLING_INTERVAL_SEC >= 15
+        assert config.DEDUP_TTL_HOURS >= 1
+        assert config.SUBJECT_MAX_LEN >= 32
+
+    def test_validate_required_env_allows_empty_portal(self, monkeypatch):
+        monkeypatch.setattr(config, "MATRIX_HOMESERVER", "https://mx")
+        monkeypatch.setattr(config, "MATRIX_ACCESS_TOKEN", "tok")
+        monkeypatch.setattr(config, "MATRIX_USER_ID", "@bot:mx")
+        monkeypatch.setattr(config, "REDMINE_URL", "https://rm")
+        monkeypatch.setattr(config, "REDMINE_API_KEY", "rk")
+        monkeypatch.setattr(config, "PORTAL_BASE_URL", "")
+        ok, errors = validate_required_env()
+        assert ok
+        assert errors == []

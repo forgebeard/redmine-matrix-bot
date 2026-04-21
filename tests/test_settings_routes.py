@@ -62,6 +62,16 @@ class TestMaskSecretValue:
         assert "•" in masked
 
 
+class TestNormalizeBaseUrl:
+    def test_strips_spaces_and_trailing_slash(self):
+        assert settings_mod._normalize_base_url("  https://support.red-soft.ru/  ") == (
+            "https://support.red-soft.ru"
+        )
+
+    def test_empty_value(self):
+        assert settings_mod._normalize_base_url("") == ""
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # _check_redmine_access
 # ═══════════════════════════════════════════════════════════════════════════

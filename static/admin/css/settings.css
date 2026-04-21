@@ -687,6 +687,26 @@ fieldset.settings-fieldset > legend {
   min-height: 0;
 }
 
+.tpl-v2-editor-layout {
+  display: grid;
+  grid-template-columns: minmax(520px, 1.2fr) minmax(420px, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.tpl-v2-code-pane,
+.tpl-v2-preview-pane {
+  min-width: 0;
+}
+
+.tpl-v2-code-pane .tpl-v2-html {
+  width: 100%;
+  min-height: 24rem;
+  max-height: 65vh;
+  resize: vertical;
+  overflow-y: auto;
+}
+
 .tpl-v2-card__title {
   margin-top: 0;
 }
@@ -707,8 +727,31 @@ fieldset.settings-fieldset > legend {
   margin-top: 0.5rem;
 }
 
+.tpl-v2-preview-pane .tpl-v2-card__footer {
+  margin-top: 0.75rem;
+}
+
+.tpl-v2-preview-pane .block-editor__footer-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
 .tpl-v2-preview-pre {
-  white-space: pre-wrap;
-  max-height: 12rem;
+  white-space: normal;
+  min-height: 24rem;
+  max-height: 65vh;
+  padding: 0.85rem;
+  border: 1px solid var(--service-bubble-border, rgba(255, 255, 255, 0.06));
+  border-radius: var(--service-bubble-radius, 12px);
+  background: var(--service-bubble-surface, rgba(255, 255, 255, 0.02));
   overflow: auto;
+}
+
+@media (max-width: 1100px) {
+  .tpl-v2-editor-layout {
+    grid-template-columns: 1fr;
+  }
 }

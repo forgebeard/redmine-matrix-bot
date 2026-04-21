@@ -7,13 +7,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.models import NotificationTemplate
 
-
 TEMPLATE_NAMES = (
     "tpl_new_issue",
     "tpl_task_change",
     "tpl_reminder",
     "tpl_digest",
-    "tpl_dry_run",
+    "tpl_test_message",
     "tpl_daily_report",
 )
 
@@ -23,7 +22,7 @@ NOTIFICATION_TEMPLATE_LABELS: dict[str, str] = {
     "tpl_task_change": "Изменение задачи",
     "tpl_reminder": "Напоминание",
     "tpl_digest": "Дайджест",
-    "tpl_dry_run": "Предпросмотр",
+    "tpl_test_message": "Тестовое сообщение",
     "tpl_daily_report": "Утренний отчёт",
 }
 

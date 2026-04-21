@@ -125,9 +125,33 @@ set_timezone(BOT_TIMEZONE)
 # ИНТЕРВАЛЫ
 # ═══════════════════════════════════════════════════════════════
 
-CHECK_INTERVAL = int(os.getenv("CHECK_INTERVAL", "90"))
+def _parse_int_env(
+    name: str,
+    default: int,
+    *,
+    min_value: int | None = None,
+    max_value: int | None = None,
+) -> int:
+    raw = (os.getenv(name, str(default)) or "").strip()
+    try:
+        value = int(raw)
+    except ValueError:
+        value = default
+    if min_value is not None:
+        value = max(min_value, value)
+    if max_value is not None:
+        value = min(max_value, value)
+    return value
+
+
+POLLING_INTERVAL_SEC = _parse_int_env("POLLING_INTERVAL_SEC", 90, min_value=15, max_value=86400)
+# Backward-compatible alias: если CHECK_INTERVAL задан, он приоритетнее.
+CHECK_INTERVAL = _parse_int_env("CHECK_INTERVAL", POLLING_INTERVAL_SEC, min_value=15, max_value=86400)
 REMINDER_AFTER = int(os.getenv("REMINDER_AFTER", "3600"))
 GROUP_REPEAT_SECONDS = int(os.getenv("GROUP_REPEAT_SECONDS", "1800"))
+DEDUP_TTL_HOURS = _parse_int_env("DEDUP_TTL_HOURS", 24, min_value=1, max_value=168)
+SUBJECT_MAX_LEN = _parse_int_env("SUBJECT_MAX_LEN", 180, min_value=32, max_value=500)
+PORTAL_BASE_URL = (os.getenv("PORTAL_BASE_URL") or "").strip().rstrip("/") or REDMINE_URL
 
 # ═══════════════════════════════════════════════════════════════
 # MATRIX — RETRY / BACKOFF
@@ -179,11 +203,15 @@ __all__ = [
     "MATRIX_DEVICE_ID",
     "REDMINE_URL",
     "REDMINE_API_KEY",
+    "PORTAL_BASE_URL",
     # tz / intervals
     "BOT_TIMEZONE",
+    "POLLING_INTERVAL_SEC",
     "CHECK_INTERVAL",
     "REMINDER_AFTER",
     "GROUP_REPEAT_SECONDS",
+    "DEDUP_TTL_HOURS",
+    "SUBJECT_MAX_LEN",
     # matrix retry
     "MATRIX_RETRY_MAX_ATTEMPTS",
     "MATRIX_RETRY_BASE_DELAY_SEC",

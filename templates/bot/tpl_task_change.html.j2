@@ -1,37 +1,12 @@
-<p>
-{% if event_type == 'assigned' %}👤 Вы назначены исполнителем
-{% elif event_type == 'reassigned' %}🔄 Задача переназначена на вас
-{% elif event_type == 'unassigned' %}📤 Вы больше не исполнитель
-{% elif event_type == 'watcher_added' %}👁 Вы добавлены в наблюдатели
-{% elif event_type == 'watcher_removed' %}🚫 Вы больше не наблюдатель
-{% else %}<strong>{{ emoji | default('') }}</strong> {{ title | default('Изменение в задаче') }}
-{% endif %}
-<a href="{{ issue_url | default('') }}">#{{ issue_id | default('') }}</a>
-</p>
-<p><strong>{{ subject | default('') }}</strong></p>
-<p>Проект: {{ project_name | default('—') }} · Статус: {{ status | default('') }} · Приоритет: {{ priority | default('') }}</p>
-<p>Исполнитель: {{ assignee_name | default('—') }}{% if due_date | default('') %} · Дедлайн: {{ due_date }}{% endif %}</p>
-
-{% if event_type == 'reassigned' and assigned_from | default('') %}<p>Предыдущий исполнитель: {{ assigned_from }}</p>{% endif %}
-{% if event_type == 'unassigned' and assignee_name | default('') %}<p>Новый исполнитель: {{ assignee_name }}</p>{% endif %}
-{% if actor_name | default('') %}
-<p>{{ actor_name }}{% if status_from | default('') %} изменил статус: <strong>{{ status_from }}</strong> → <strong>{{ status | default('') }}</strong>{% endif %}</p>
-{% endif %}
-
-{% if changes is defined and changes %}
-<ul>
-{% for c in changes %}
-  <li>{{ c.field | default('Поле') }}: {{ c.old | default('—') }} → {{ c.new | default('—') }}</li>
-{% endfor %}
-</ul>
-{% endif %}
-{% if journal_notes | default('') %}
-<blockquote>{{ journal_notes }}</blockquote>
-{% endif %}
-{% if not (changes is defined and changes) and extra_text | default('') %}
-<p>{{ extra_text }}</p>
-{% endif %}
-{% if extra_changes | default(0) > 0 %}
-<p>(и ещё {{ extra_changes }} изменений)</p>
-{% endif %}
-<p><a href="{{ issue_url | default('') }}">Открыть задачу</a></p>
+<blockquote>
+Задача обновлена<br>
+#{{ issue_id | default('') }}{% if subject | default('') %} — {{ subject }}{% endif %}<br>
+<br>
+Проект: {{ project_name | default('—') }}<br>
+Версия: {{ version_line | default(version | default('—')) }}<br>
+Статус: {{ status_line | default(status | default('—')) }}<br>
+Приоритет: {{ priority_line | default(priority | default('—')) }}<br>
+Исполнитель: {{ assignee_line | default(assignee_name | default('—')) }}<br>
+<br>
+<a href="{{ issue_url | default('') }}">Открыть задачу</a>
+</blockquote>

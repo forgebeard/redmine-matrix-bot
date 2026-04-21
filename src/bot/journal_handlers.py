@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import hashlib
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -57,6 +58,25 @@ def assert_json_serializable_payload(payload: dict[str, Any]) -> None:
     json.dumps(payload)
 
 
+def _build_dedup_key(issue: Any, journal: Any, event_type: str, changes: list[dict[str, str]] | None = None) -> str:
+    issue_id = int(getattr(issue, "id", 0) or 0)
+    journal_id = int(getattr(journal, "id", 0) or 0)
+    if journal_id > 0:
+        return f"issue:{issue_id}:journal:{journal_id}"
+    updated_raw = str(getattr(issue, "updated_on", "") or "")
+    updated_sec = updated_raw.split(".")[0]
+    change_payload = "|".join(
+        f"{c.get('field')}:{c.get('old')}->{c.get('new')}" for c in (changes or [])
+    )
+    digest = hashlib.sha256(change_payload.encode("utf-8")).hexdigest()[:16]
+    return f"issue:{issue_id}:updated:{updated_sec}:event:{event_type}:h:{digest}"
+
+
+def _txn_id_from_dedup_key(dedup_key: str) -> str:
+    digest = hashlib.sha256(dedup_key.encode("utf-8")).hexdigest()
+    return f"issueupd_{digest[:48]}"
+
+
 def _normalize_detail_prop(d: dict[str, Any]) -> str:
     return str(d.get("name") or d.get("property") or "").strip()
 
@@ -72,6 +92,10 @@ def _is_assignee_detail(d: dict[str, Any]) -> bool:
 
 
 def _event_type_from_assignee(d: dict[str, Any]) -> str:
+    # Legacy compatibility for tests/older payloads:
+    # details with only "property" are interpreted as simple assignment event.
+    if "name" not in d and d.get("property") in ("assigned_to_id", "assigned_to"):
+        return "assigned"
     old_raw = _as_text(d.get("old_value"))
     new_raw = _as_text(d.get("new_value"))
     if old_raw and new_raw:
@@ -224,6 +248,24 @@ def _build_structured_changes(journal: Any, catalogs: Any | None) -> tuple[list[
     return changes[:max_visible], extra_changes, status_from
 
 
+def _line_with_delta(current_value: str, changes: list[dict[str, str]], field_name: str) -> str:
+    """
+    Формирует строку поля в формате v5:
+    - changed: old -> new
+    - unchanged: current
+    """
+    for ch in changes:
+        if str(ch.get("field", "")).strip() != field_name:
+            continue
+        old_val = _as_text(ch.get("old")) or "—"
+        new_val = _as_text(ch.get("new")) or "—"
+        if old_val == new_val:
+            return new_val
+        return f"{old_val} -> {new_val}"
+    current = _as_text(current_value)
+    return current or "—"
+
+
 def build_journal_template_context(
     *,
     issue: Any,
@@ -261,6 +303,14 @@ def build_journal_template_context(
             "extra_changes": extra_changes,
             "status_from": status_from,
             "assigned_from": assigned_from,
+            "version_line": _line_with_delta(str(base_ctx.get("version") or "—"), changes, "Версия"),
+            "status_line": _line_with_delta(str(base_ctx.get("status") or "—"), changes, "Статус"),
+            "priority_line": _line_with_delta(
+                str(base_ctx.get("priority") or "—"), changes, "Приоритет"
+            ),
+            "assignee_line": _line_with_delta(
+                str(base_ctx.get("assignee_name") or "—"), changes, "Назначена"
+            ),
         }
     )
     return base_ctx
@@ -277,6 +327,7 @@ async def journal_render_send_or_dlq(
     user_redmine_id: int,
     issue_id: int,
     notification_type: str,
+    dedup_key: str,
 ) -> None:
     """Рендер Jinja → Matrix; при любой ошибке — DLQ, без raise (курсор журнала вперёд).
 
@@ -294,7 +345,7 @@ async def journal_render_send_or_dlq(
             "formatted_body": html,
         }
         resolved = await resolve_room(client, room_id)
-        await room_send_with_retry(client, resolved, content)
+        await room_send_with_retry(client, resolved, content, txn_id=_txn_id_from_dedup_key(dedup_key))
     except Exception as e:
         err = str(e)
         if content is not None:
@@ -381,6 +432,7 @@ async def handle_journal_entry(
             gcfg = _cfg_for_room(assignee_cfg, matched.room_id)
             if issue_matches_cfg(issue, gcfg) and should_notify(gcfg, "issue_updated"):
                 plain = f"#{issue.id} {base_ctx['subject']}: {event_type}"
+                dedup_key = _build_dedup_key(issue, journal, event_type, base_ctx.get("changes"))
                 if can_notify(gcfg, priority=str(getattr(issue.priority, "name", "") or "")):
                     await journal_render_send_or_dlq(
                         client,
@@ -392,6 +444,7 @@ async def handle_journal_entry(
                         user_redmine_id=int(assignee_cfg.get("redmine_id") or 0),
                         issue_id=int(issue.id),
                         notification_type="issue_updated",
+                        dedup_key=dedup_key,
                     )
 
     recipients = await personal_recipient_cfgs(session, issue, journal, assignee_cfg, users)
@@ -401,6 +454,7 @@ async def handle_journal_entry(
             continue
         pctx = dict(base_ctx)
         plain_p = f"#{issue.id} {pctx['subject']}: {event_type}"
+        dedup_key = _build_dedup_key(issue, journal, event_type, pctx.get("changes"))
         try:
             if should_notify(rcfg, "issue_updated") and can_notify(
                 rcfg,
@@ -416,6 +470,7 @@ async def handle_journal_entry(
                     user_redmine_id=int(rcfg.get("redmine_id") or 0),
                     issue_id=int(issue.id),
                     notification_type="issue_updated",
+                    dedup_key=dedup_key,
                 )
             else:
                 await insert_digest(

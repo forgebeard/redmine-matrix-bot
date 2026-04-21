@@ -31,7 +31,7 @@
 
 **Matrix Device ID** (`MATRIX_DEVICE_ID`) в панели не задаётся: используйте переменную окружения или ключ `MATRIX_DEVICE_ID` в таблице `cycle_settings`; после смены перезапустите процесс бота.
 
-**Шаблоны уведомлений Matrix:** вкладка «Уведомления» в Настройках (`/onboarding`). Справочник полей Jinja по каждому шаблону — [notification_template_variables.md](notification_template_variables.md).
+**Шаблоны уведомлений Matrix:** вкладка «Уведомления» в Настройках (`/onboarding`). Справочник полей Jinja по каждому шаблону — [notification_template_variables.md](notification_template_variables.md). Тестовые отправки из панелей Пользователи/Группы используют только шаблон `tpl_test_message` (редактируется там же). Legacy-шаблон `tpl_dry_run` удалён из runtime/API.
 
 ### 2.1. Страница «Секреты» (`/secrets`)
 

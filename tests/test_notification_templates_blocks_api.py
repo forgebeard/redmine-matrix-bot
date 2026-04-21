@@ -1,4 +1,4 @@
-"""API блокового редактора шаблонов уведомлений."""
+"""API code-only редактора шаблонов уведомлений."""
 
 from __future__ import annotations
 
@@ -31,149 +31,91 @@ def _admin_db(client: TestClient):
     _setup_and_login_admin(client)
 
 
-def test_compile_blocks_success(client: TestClient, _admin_db: None) -> None:
+def test_removed_block_editor_endpoints_return_404(client: TestClient, _admin_db: None) -> None:
+    cases = [
+        ("POST", "/api/bot/notification-templates/compile-blocks", {"template_name": "tpl_new_issue", "blocks": []}),
+        ("GET", "/api/bot/notification-templates/block-registry", None),
+        ("GET", "/api/bot/notification-templates/tpl_new_issue/decompose", None),
+        ("POST", "/api/bot/notification-templates/tpl_new_issue/decompose-body", {"body_html": "<p>x</p>"}),
+    ]
+    for method, url, payload in cases:
+        if method == "GET":
+            resp = client.get(url)
+        else:
+            resp = client.post(url, json=payload, headers=_json_headers(client))
+        assert resp.status_code == 404, f"{method} {url} should be removed"
+
+
+def test_preview_code_only_ok(client: TestClient, _admin_db: None) -> None:
     resp = client.post(
-        "/api/bot/notification-templates/compile-blocks",
+        "/api/bot/notification-templates/preview",
+        json={"name": "tpl_new_issue", "body_html": "<blockquote>ok {{ issue.id }}</blockquote>"},
+        headers=_json_headers(client),
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data.get("ok") is True
+    assert "issue" in str(data.get("html") or "")
+
+
+def test_preview_code_only_error(client: TestClient, _admin_db: None) -> None:
+    resp = client.post(
+        "/api/bot/notification-templates/preview",
+        json={"name": "tpl_new_issue", "body_html": "{{ bad_syntax"},
+        headers=_json_headers(client),
+    )
+    assert resp.status_code == 400
+    data = resp.json()
+    assert data.get("ok") is False
+    assert "error" in data
+
+
+def test_preview_tpl_test_message_ok(client: TestClient, _admin_db: None) -> None:
+    resp = client.post(
+        "/api/bot/notification-templates/preview",
         json={
-            "template_name": "tpl_new_issue",
-            "blocks": [
-                {
-                    "block_id": "new_issue_header",
-                    "enabled": True,
-                    "order": 0,
-                    "settings": {"emoji": "🆕"},
-                },
-                {"block_id": "issue_subject", "enabled": True, "order": 1, "settings": {}},
-                {"block_id": "new_issue_status", "enabled": True, "order": 2, "settings": {}},
-            ],
+            "name": "tpl_test_message",
+            "body_html": "<b>{{ title }}</b><br>{{ message }}<br>{{ scope }}",
+            "context": {
+                "title": "Тестовое сообщение",
+                "message": "Тест из панели",
+                "sent_at": "11:22:33",
+                "timezone": "Europe/Moscow",
+                "scope": "group",
+            },
         },
         headers=_json_headers(client),
     )
     assert resp.status_code == 200
     data = resp.json()
     assert data.get("ok") is True
-    assert "jinja" in data
-    assert data.get("html_preview")
+    assert "Тест из панели" in str(data.get("html") or "")
+    assert "group" in str(data.get("html") or "")
 
 
-def test_compile_blocks_unknown_block_400(client: TestClient, _admin_db: None) -> None:
-    resp = client.post(
-        "/api/bot/notification-templates/compile-blocks",
-        json={
-            "template_name": "tpl_new_issue",
-            "blocks": [
-                {"block_id": "evil", "enabled": True, "order": 0, "settings": {}},
-            ],
-        },
-        headers=_json_headers(client),
+def test_default_custom_contract_save_and_reset(client: TestClient, _admin_db: None) -> None:
+    token = _csrf(client)
+    put_resp = client.put(
+        "/api/bot/notification-templates/tpl_new_issue",
+        data={"csrf_token": token, "body_html": "<p>custom {{ issue.id }}</p>", "body_plain": ""},
     )
-    assert resp.status_code == 400
-    body = resp.json()
-    assert body.get("ok") is False
-    assert "Unknown" in (body.get("error") or "")
+    assert put_resp.status_code == 200
 
+    listing = client.get("/api/bot/notification-templates")
+    assert listing.status_code == 200
+    row = next(t for t in listing.json().get("templates", []) if t["name"] == "tpl_new_issue")
+    assert row["override_html"] is not None
+    assert row["default_html"] is not None
 
-def test_compile_blocks_bad_template_400(client: TestClient, _admin_db: None) -> None:
-    resp = client.post(
-        "/api/bot/notification-templates/compile-blocks",
-        json={"template_name": "tpl_not_a_real_template", "blocks": []},
-        headers=_json_headers(client),
+    reset_resp = client.post(
+        "/api/bot/notification-templates/tpl_new_issue/reset",
+        data={"csrf_token": token},
     )
-    assert resp.status_code == 400
-
-
-def test_compile_blocks_csrf_400(client: TestClient, _admin_db: None) -> None:
-    resp = client.post(
-        "/api/bot/notification-templates/compile-blocks",
-        json={"template_name": "tpl_new_issue", "blocks": []},
-        headers={"Content-Type": "application/json", "Accept": "application/json", "X-CSRF-Token": "bad"},
-    )
-    assert resp.status_code == 400
-
-
-def test_compile_blocks_guest_rejected() -> None:
-    """Без входа в админку — отказ (CSRF и/или роль). Новый клиент без cookies."""
-    import admin.main as admin_main  # noqa: PLC0415
-
-    with TestClient(admin_main.app) as c:
-        resp = c.post(
-            "/api/bot/notification-templates/compile-blocks",
-            json={"template_name": "tpl_new_issue", "blocks": []},
-            headers={"Content-Type": "application/json", "X-CSRF-Token": "x"},
-            follow_redirects=False,
-        )
-    assert resp.status_code in (302, 303, 400, 403)
-
-
-def test_decompose_get(client: TestClient, _admin_db: None) -> None:
-    resp = client.get("/api/bot/notification-templates/tpl_new_issue/decompose")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data.get("ok") is True
-    assert data.get("blocks") is not None
-    assert data.get("is_custom_jinja") is False
-    assert len(data.get("default_blocks") or []) >= 1
-
-
-def test_decompose_digest_ok(client: TestClient, _admin_db: None) -> None:
-    resp = client.get("/api/bot/notification-templates/tpl_digest/decompose")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data.get("ok") is True
-    assert data.get("is_custom_jinja") is False
-    assert data.get("blocks")
-
-
-def test_decompose_body_roundtrip(client: TestClient, _admin_db: None) -> None:
-    cr = client.post(
-        "/api/bot/notification-templates/compile-blocks",
-        json={
-            "template_name": "tpl_task_change",
-            "blocks": [
-                {
-                    "block_id": "task_change_body",
-                    "enabled": True,
-                    "order": 0,
-                    "settings": {},
-                }
-            ],
-        },
-        headers=_json_headers(client),
-    )
-    assert cr.status_code == 200
-    jinja = cr.json()["jinja"]
-    resp = client.post(
-        "/api/bot/notification-templates/tpl_task_change/decompose-body",
-        json={"body_html": jinja},
-        headers=_json_headers(client),
-    )
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data.get("blocks") is not None
-    assert data.get("is_custom_jinja") is False
-
-
-def test_decompose_body_custom(client: TestClient, _admin_db: None) -> None:
-    resp = client.post(
-        "/api/bot/notification-templates/tpl_new_issue/decompose-body",
-        json={"body_html": "<div>{{ totally_custom }}</div>"},
-        headers=_json_headers(client),
-    )
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data.get("blocks") is None
-    assert data.get("is_custom_jinja") is True
-
-
-def test_block_registry(client: TestClient, _admin_db: None) -> None:
-    resp = client.get("/api/bot/notification-templates/block-registry")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data.get("ok") is True
-    blocks = data.get("blocks") or []
-    assert isinstance(blocks, list)
-    assert len(blocks) > 0
-    assert "settings_schema" in blocks[0]
+    assert reset_resp.status_code == 200
+    listing2 = client.get("/api/bot/notification-templates")
+    row2 = next(t for t in listing2.json().get("templates", []) if t["name"] == "tpl_new_issue")
+    assert row2["override_html"] is None
+    assert row2["default_html"] is not None
 
 
 def test_notification_templates_list_includes_display_name(client: TestClient, _admin_db: None) -> None:
@@ -184,6 +126,8 @@ def test_notification_templates_list_includes_display_name(client: TestClient, _
     templates = data.get("templates") or []
     assert len(templates) == len(TEMPLATE_NAMES)
     by_name = {t["name"]: t for t in templates}
+    assert "tpl_test_message" in by_name
+    assert "tpl_dry_run" not in by_name
     for name in TEMPLATE_NAMES:
         row = by_name[name]
         assert "display_name" in row

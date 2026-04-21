@@ -2,6 +2,14 @@
 
 Шаблоны хранятся в таблице `notification_templates`, дефолтное тело — в `templates/bot/tpl_*.html.j2`. Контекст собирается в коде бота или админ-превью (`preview_issue_context_demo`, `_preview_context_for` в `notification_templates`).
 
+## Контракт редактора (code-only)
+
+- Вкладка `Уведомления` работает только в режиме `код + preview` для всех `tpl_*`.
+- `tpl_dry_run` удалён из активного контура (реестр/API/UI); для тестовой проверки доставки используется `tpl_test_message`.
+- Сохранение (`PUT /api/bot/notification-templates/{name}`) записывает `override_html` в БД.
+- Сброс (`POST /api/bot/notification-templates/{name}/reset`) удаляет override и возвращает файловый default.
+- Live-preview использует `POST /api/bot/notification-templates/preview`; при ошибке рендера UI показывает текст ошибки и не зависает в `loading`.
+
 Общее для issue-шаблонов (`tpl_new_issue`, `tpl_task_change`, `tpl_reminder`): функция `build_issue_context` в [`src/bot/template_context.py`](../src/bot/template_context.py) задаёт базовые поля; вызовы в [`sender.py`](../src/bot/sender.py) / [`journal_handlers.py`](../src/bot/journal_handlers.py) / [`reminder_service.py`](../src/bot/reminder_service.py) дополняют `emoji`, `title`, `event_type`, `extra_text`, `reminder_text` по сценарию.
 
 | Переменная | Описание |
@@ -46,6 +54,10 @@
 - `journal_notes` — комментарий журнала.
 - `status_from` — прежний статус при смене статуса.
 - `assigned_from` — имя прежнего исполнителя (если найдено по `redmine_id`).
+- `status_line` — строка для поля `Статус` в формате v5 (`old -> new` или текущее значение).
+- `priority_line` — строка для поля `Приоритет` в формате v5.
+- `version_line` — строка для поля `Версия` в формате v5.
+- `assignee_line` — строка для поля `Исполнитель` в формате v5.
 
 ---
 
@@ -71,9 +83,17 @@
 
 ---
 
-## `tpl_dry_run`
+## `tpl_test_message`
 
-Предпросмотр в админке: `issue_id`, `issue_url`, `subject`.
+Тестовое сообщение из панели (`/users/test-message`, `/groups/test-message`) рендерится отдельным шаблоном.
+
+| Переменная | Описание |
+|------------|----------|
+| `title` | Заголовок тестового сообщения (`Тестовое сообщение` / `Тестовое сообщение группы`) |
+| `message` | Основной текст сообщения о проверке подключения |
+| `sent_at` | Время отправки в формате `HH:MM:SS` |
+| `timezone` | Таймзона сервиса, в которой вычислено `sent_at` |
+| `scope` | Область теста: `user` или `group` |
 
 ---
 

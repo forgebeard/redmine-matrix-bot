@@ -8,6 +8,7 @@ import pytest
 
 from admin.template_blocks import (
     _BLOCK_LIST,
+    ARCHIVED_TEMPLATE_BLOCKS,
     BLOCK_EDITOR_TEMPLATES,
     BLOCK_REGISTRY,
     DEFAULT_BLOCK_CONFIGS,
@@ -25,6 +26,9 @@ from bot.template_loader import read_default_file
 
 
 class TestBlockRegistry:
+    def test_module_marked_archived(self) -> None:
+        assert ARCHIVED_TEMPLATE_BLOCKS is True
+
     def test_unique_ids(self) -> None:
         ids = [b.id for b in _BLOCK_LIST]
         assert len(ids) == len(set(ids))
@@ -108,7 +112,7 @@ class TestCompileEtalon:
         assert _normalize_for_match(compiled) == _normalize_for_match(file_html)
 
     def test_monolith_templates_compile_byte_identical_to_default_files(self) -> None:
-        for name in ("tpl_digest", "tpl_dry_run"):
+        for name in ("tpl_digest",):
             compiled = compile_blocks_to_jinja(DEFAULT_BLOCK_CONFIGS[name])
             assert compiled == (read_default_file(name) or "")
 

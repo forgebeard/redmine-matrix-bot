@@ -10,6 +10,7 @@
 
 import asyncio
 import logging
+from typing import Any
 
 from nio import RoomSendError
 
@@ -40,9 +41,23 @@ def _get_retry_settings() -> tuple[int, float]:
 
 # Re-export для обратной совместимости (тесты)
 MAX_RETRIES, RETRY_BASE_SEC = _get_retry_settings()
+RETRY_DELAYS_SEC = (1.0, 3.0, 7.0)
 
 
-async def room_send_with_retry(client, room_id, content):
+def _retry_delay_for_attempt(attempt: int) -> float:
+    idx = max(0, min(attempt - 1, len(RETRY_DELAYS_SEC) - 1))
+    return RETRY_DELAYS_SEC[idx]
+
+
+def _status_int(resp: Any) -> int | None:
+    code = getattr(resp, "status_code", None)
+    try:
+        return int(code) if code is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+async def room_send_with_retry(client, room_id, content, *, txn_id: str | None = None):
     """
     Отправка в комнату с повторными попытками.
 
@@ -55,25 +70,50 @@ async def room_send_with_retry(client, room_id, content):
     for attempt in range(1, max_retries + 1):
         try:
             resp = await client.room_send(
-                room_id=room_id, message_type="m.room.message", content=content
+                room_id=room_id,
+                message_type="m.room.message",
+                content=content,
+                tx_id=txn_id,
             )
             # Успех: у ответа nio есть event_id (совместимо с моками, где isinstance(RoomSendError) ломается)
             if getattr(resp, "event_id", None):
                 return resp
             if isinstance(resp, RoomSendError):
                 _log_matrix_send_response(resp, room_id)
+                sc_int = _status_int(resp)
                 last_err = RuntimeError(
                     f"Matrix room_send error: {getattr(resp, 'message', resp)} "
                     f"(status_code={getattr(resp, 'status_code', None)}, room={room_id})"
                 )
+                if sc_int is not None and 400 <= sc_int < 500 and sc_int != 429:
+                    break
+                is_rate_limited = (
+                    sc_int == 429
+                    or str(getattr(resp, "status_code", "")).upper() == "M_LIMIT_EXCEEDED"
+                )
+                retry_after_ms = getattr(resp, "retry_after_ms", None)
+                if is_rate_limited and retry_after_ms and attempt < max_retries:
+                    delay = max(0.1, float(retry_after_ms) / 1000.0)
+                    logger.warning(
+                        "Matrix rate limited (%s/%s): %s; retry in %.1fs",
+                        attempt,
+                        max_retries,
+                        last_err,
+                        delay,
+                    )
+                    await asyncio.sleep(delay)
+                    continue
             elif getattr(resp, "status_code", None) is not None and not getattr(
                 resp, "event_id", None
             ):
                 _log_matrix_send_response(resp, room_id)
+                sc_int = _status_int(resp)
                 last_err = RuntimeError(
                     f"Matrix room_send error: {getattr(resp, 'message', resp)} "
                     f"(status_code={resp.status_code}, room={room_id})"
                 )
+                if sc_int is not None and 400 <= sc_int < 500 and sc_int != 429:
+                    break
             else:
                 return resp
         except Exception as e:
@@ -90,7 +130,7 @@ async def room_send_with_retry(client, room_id, content):
         if attempt >= max_retries:
             break
 
-        delay = retry_base_sec * (2 ** (attempt - 1))
+        delay = _retry_delay_for_attempt(attempt)
         logger.warning(
             "Matrix send failed (%s/%s): %s; retry in %.1fs",
             attempt,

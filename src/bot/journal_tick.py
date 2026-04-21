@@ -12,6 +12,7 @@ from bot.config_state import GROUPS, ROUTING, USERS
 from bot.digest_service import drain_pending_digests
 from bot.journal_handlers import handle_journal_entry
 from bot.journal_pipeline import (
+    aggregate_journals_first_old_last_new,
     advance_cursor_after_journal,
     iter_new_journals_for_issue,
     load_bot_user_redmine_ids,
@@ -135,14 +136,15 @@ async def run_journal_tick(
             await sync_watcher_cache_for_issue(session, full, redmine_id_to_bot_id=rid_map)
             new_js = await iter_new_journals_for_issue(session, full)
             assignee = _assignee_cfg(full, users)
-            for j in new_js:
+            aggregated = aggregate_journals_first_old_last_new(new_js)
+            if aggregated is not None:
                 if assignee is not None:
                     try:
                         await handle_journal_entry(
                             client,
                             session,
                             issue=full,
-                            journal=j,
+                            journal=aggregated,
                             assignee_cfg=assignee,
                             routes_cfg=routes_cfg,
                             groups=groups,
@@ -152,16 +154,16 @@ async def run_journal_tick(
                         logger.error(
                             "journal_handle_failed #%s j=%s",
                             full.id,
-                            getattr(j, "id", "?"),
+                            getattr(aggregated, "id", "?"),
                             exc_info=True,
                         )
                 else:
                     logger.info(
                         "journal_skip_no_assignee issue_id=%s journal_id=%s",
                         full.id,
-                        getattr(j, "id", "?"),
+                        getattr(aggregated, "id", "?"),
                     )
-                await advance_cursor_after_journal(session, int(full.id), int(j.id))
+                await advance_cursor_after_journal(session, int(full.id), int(aggregated.id))
                 await session.commit()
 
             try:

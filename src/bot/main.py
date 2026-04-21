@@ -183,6 +183,7 @@ ACCESS_TOKEN: str = ""
 MATRIX_USER_ID: str = ""
 REDMINE_URL: str = ""
 REDMINE_KEY: str = ""
+PORTAL_BASE_URL: str = ""
 
 # Время последней успешной проверки для каждого пользователя
 _last_check_time: dict[int, datetime] = {}
@@ -194,6 +195,27 @@ logger = logging.getLogger("redmine_bot")
 logger.setLevel(logging.INFO)
 logging.getLogger("nio.responses").setLevel(logging.CRITICAL)
 logging.getLogger("nio.crypto").setLevel(logging.WARNING)
+
+
+def _has_console_handler(log: logging.Logger) -> bool:
+    for h in log.handlers:
+        if isinstance(h, logging.StreamHandler) and not isinstance(h, logging.FileHandler):
+            return True
+    return False
+
+
+def _has_file_handler(log: logging.Logger, target_path: Path) -> bool:
+    target = str(target_path.resolve())
+    for h in log.handlers:
+        if not isinstance(h, logging.FileHandler):
+            continue
+        try:
+            if str(Path(getattr(h, "baseFilename", "")).resolve()) == target:
+                return True
+        except Exception:
+            continue
+    return False
+
 
 setup_json_logging("redmine_bot")
 
@@ -209,7 +231,8 @@ if want_log_file():
             encoding="utf-8",
         )
         _fh.setFormatter(get_log_formatter())
-        logger.addHandler(_fh)
+        if not _has_file_handler(logger, _log_path):
+            logger.addHandler(_fh)
     except PermissionError as e:
         logger.warning("Файловый лог недоступен (нет прав): %s", e)
     except OSError as e:
@@ -218,9 +241,13 @@ if want_log_file():
         else:
             raise
 
-_ch = logging.StreamHandler()
-_ch.setFormatter(get_log_formatter())
-logger.addHandler(_ch)
+if not _has_console_handler(logger):
+    _ch = logging.StreamHandler()
+    _ch.setFormatter(get_log_formatter())
+    logger.addHandler(_ch)
+
+# Не отдаём события в root handlers, иначе в docker-окружении легко получить ×2.
+logger.propagate = False
 
 # ── Утилиты ──────────────────────────────────────────────────────────────────
 
@@ -267,6 +294,7 @@ async def main() -> None:
         MATRIX_USER_ID, \
         REDMINE_URL, \
         REDMINE_KEY, \
+        PORTAL_BASE_URL, \
         CHECK_INTERVAL, \
         REMINDER_AFTER, \
         GROUP_REPEAT_SECONDS, \
@@ -288,10 +316,12 @@ async def main() -> None:
     _SECRET_NAMES = [
         "REDMINE_URL",
         "REDMINE_API_KEY",
+        "PORTAL_BASE_URL",
         "MATRIX_HOMESERVER",
         "MATRIX_ACCESS_TOKEN",
         "MATRIX_USER_ID",
     ]
+    portal_fallback_logged = False
 
     while True:
         try:
@@ -322,12 +352,22 @@ async def main() -> None:
                     config[name] = ""
 
             missing = [name for name in _SECRET_NAMES if not config.get(name)]
+            if "PORTAL_BASE_URL" in missing and config.get("REDMINE_URL"):
+                missing = [m for m in missing if m != "PORTAL_BASE_URL"]
+                if not portal_fallback_logged:
+                    logger.info(
+                        "PORTAL_BASE_URL не задан, используем REDMINE_URL как базу ссылок портала"
+                    )
+                    portal_fallback_logged = True
             if not missing:
                 HOMESERVER = config["MATRIX_HOMESERVER"]
                 ACCESS_TOKEN = config["MATRIX_ACCESS_TOKEN"]
                 MATRIX_USER_ID = config["MATRIX_USER_ID"]
                 REDMINE_URL = config["REDMINE_URL"]
                 REDMINE_KEY = config["REDMINE_API_KEY"]
+                PORTAL_BASE_URL = (config.get("PORTAL_BASE_URL") or config["REDMINE_URL"]).rstrip(
+                    "/"
+                )
                 logger.info("✅ Конфиг загружен из БД")
                 _env_hints = env_placeholder_hints()
                 if _env_hints:
@@ -487,10 +527,11 @@ async def main() -> None:
 
     apply_service_timezone_to_bot_logger(BOT_TIMEZONE)
 
-    # ── Инициализация sender (REDMINE_URL для ссылок в шаблонах) ──
+    # ── Инициализация sender (URL для ссылок в шаблонах) ──
     import bot.sender as _sender_mod
 
     _sender_mod.REDMINE_URL = REDMINE_URL
+    _sender_mod.PORTAL_BASE_URL = PORTAL_BASE_URL or REDMINE_URL
 
     # ── Инициализация processor config ──
     import bot.processor as _proc_mod
@@ -768,3 +809,4 @@ if __name__ == "__main__":
 
 # ── Post-import инициализация (после того как все переменные определены) ─────
 _sender_mod.REDMINE_URL = REDMINE_URL
+_sender_mod.PORTAL_BASE_URL = PORTAL_BASE_URL or REDMINE_URL

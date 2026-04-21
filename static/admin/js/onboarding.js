@@ -272,18 +272,83 @@
       return csrfInput ? csrfInput.value : "";
     }
 
+    function escapeHtml(str) {
+      var d = document.createElement("div");
+      d.textContent = String(str == null ? "" : str);
+      return d.innerHTML;
+    }
+
+    function sourceKind(tpl) {
+      return tpl.override_html != null && tpl.override_html !== "" ? "custom" : "default";
+    }
+
+    function sourceBadge(kind) {
+      return kind === "custom" ? "Источник: custom override" : "Источник: default";
+    }
+
+    function setPreviewLoading(previewEl, loading) {
+      if (!previewEl) return;
+      previewEl.classList.toggle("tpl-v2-preview-out--loading", !!loading);
+    }
+
+    function _computedPx(el, prop, fallback) {
+      var val = parseFloat(window.getComputedStyle(el)[prop] || "");
+      return Number.isFinite(val) ? val : fallback;
+    }
+
+    function autoResizeTextarea(ta) {
+      if (!ta) return;
+      ta.style.height = "auto";
+      var minPx = _computedPx(ta, "minHeight", 0);
+      var maxPx = _computedPx(ta, "maxHeight", Number.POSITIVE_INFINITY);
+      var next = Math.max(minPx, ta.scrollHeight);
+      next = Math.min(next, maxPx);
+      ta.style.height = String(next) + "px";
+      ta.style.overflowY = ta.scrollHeight > maxPx ? "auto" : "hidden";
+    }
+
+    function renderPreviewState(previewEl, html, isError) {
+      if (!previewEl) return;
+      if (isError) {
+        previewEl.innerHTML = '<p class="error">Ошибка предпросмотра: ' + escapeHtml(html) + "</p>";
+        return;
+      }
+      previewEl.innerHTML = html || '<p class="muted">Пустой шаблон</p>';
+    }
+
+    function previewTemplate(name, getBody, previewEl, reqToken) {
+      var token = ++reqToken.current;
+      setPreviewLoading(previewEl, true);
+      fetch("/api/bot/notification-templates/preview", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": csrfToken(),
+          Accept: "application/json"
+        },
+        body: JSON.stringify({ name: name, body_html: getBody() })
+      }).then(function (resp) {
+        return resp.json().then(function (data) {
+          return { ok: resp.ok, data: data || {} };
+        });
+      }).then(function (res) {
+        if (token !== reqToken.current) return;
+        if (!res.ok) {
+          renderPreviewState(previewEl, res.data.detail || res.data.error || "render_failed", true);
+          return;
+        }
+        renderPreviewState(previewEl, String(res.data.html || ""), false);
+      }).catch(function (e) {
+        if (token !== reqToken.current) return;
+        renderPreviewState(previewEl, e && e.message ? e.message : "network_error", true);
+      }).finally(function () {
+        if (token === reqToken.current) setPreviewLoading(previewEl, false);
+      });
+    }
+
     function loadV2() {
       statusEl.textContent = "Загрузка шаблонов v2…";
-      var editorNames = {};
-      var bootEl = document.getElementById("block-editor-bootstrap");
-      if (bootEl && bootEl.textContent) {
-        try {
-          var bt = JSON.parse(bootEl.textContent);
-          (bt.editor_template_names || []).forEach(function (n) {
-            editorNames[n] = true;
-          });
-        } catch (ignore) {}
-      }
       var dailyRoot = document.getElementById("daily-report-template-root");
       var dailyMissing = document.getElementById("daily-report-template-missing");
       fetch("/api/bot/notification-templates", {
@@ -294,115 +359,90 @@
         if (!resp.ok) throw new Error("load_failed");
         return resp.json();
       }).then(function (data) {
-        tplScope.querySelectorAll(".block-editor-root").forEach(function (el) {
-          if (el._blockEditor && typeof el._blockEditor.destroy === "function") {
-            el._blockEditor.destroy();
-          }
-          el._blockEditor = null;
-        });
         root.innerHTML = "";
         if (dailyRoot) dailyRoot.innerHTML = "";
         var hadDailyTpl = false;
         (data.templates || []).forEach(function (tpl) {
           var displayLabel = tpl.display_name || tpl.name;
           var isDailyTemplate = tpl.name === "tpl_daily_report";
-          var isEditorTemplate = !!editorNames[tpl.name];
           var wrap = document.createElement("div");
           wrap.className = isDailyTemplate ? "daily-report__editor-wrap" : "service-bubble tpl-v2-template-card";
-          if (!isDailyTemplate && !isEditorTemplate) {
-            var title = document.createElement("div");
-            title.className = "card-title tpl-v2-card__title";
-            title.textContent = displayLabel;
-            wrap.appendChild(title);
+          var head = document.createElement("div");
+          head.className = "daily-report__head";
+          var headTitle = document.createElement("div");
+          headTitle.className = "card-title";
+          headTitle.textContent = displayLabel;
+          head.appendChild(headTitle);
+          var badge = document.createElement("span");
+          badge.className = "muted";
+          badge.textContent = sourceBadge(sourceKind(tpl));
+          head.appendChild(badge);
+          wrap.appendChild(head);
+
+          var layout = document.createElement("div");
+          layout.className = "tpl-v2-editor-layout";
+
+          var codePane = document.createElement("div");
+          codePane.className = "tpl-v2-code-pane";
+
+          var previewPane = document.createElement("div");
+          previewPane.className = "tpl-v2-preview-pane";
+
+          var ta = document.createElement("textarea");
+          ta.className = "tpl-v2-html";
+          ta.setAttribute("data-name", tpl.name);
+          ta.rows = 10;
+          ta.value = sourceKind(tpl) === "custom" ? (tpl.override_html || "") : (tpl.default_html || "");
+          codePane.appendChild(ta);
+
+          var footer = document.createElement("div");
+          footer.className = "block-editor__footer tpl-v2-card__footer";
+          var st = document.createElement("span");
+          st.className = "block-editor__status";
+          footer.appendChild(st);
+          var actions = document.createElement("div");
+          actions.className = "block-editor__footer-actions";
+          ["Сохранить", "Сбросить"].forEach(function (label, idx) {
+            var b = document.createElement("button");
+            b.type = "button";
+            b.textContent = label;
+            b.className = idx === 0 ? "btn btn-primary" : "btn btn-ghost";
+            if (idx === 0) b.classList.add("tpl-v2-save");
+            if (idx === 1) b.classList.add("tpl-v2-reset");
+            b.setAttribute("data-name", tpl.name);
+            b.setAttribute("data-display-label", displayLabel);
+            actions.appendChild(b);
+          });
+          footer.appendChild(actions);
+
+          var pre = document.createElement("div");
+          pre.className = "tpl-v2-preview-out muted tpl-v2-preview-pre";
+          pre.setAttribute("data-name", tpl.name);
+          pre.innerHTML = '<p class="muted">Загрузка предпросмотра…</p>';
+          previewPane.appendChild(pre);
+          previewPane.appendChild(footer);
+
+          layout.appendChild(codePane);
+          layout.appendChild(previewPane);
+          wrap.appendChild(layout);
+
+          var reqToken = { current: 0 };
+          var debounceTimer = null;
+          function schedulePreview() {
+            clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(function () {
+              previewTemplate(tpl.name, function () { return ta.value; }, pre, reqToken);
+            }, 400);
           }
-          if (isEditorTemplate) {
-            if (!isDailyTemplate) {
-              var head = document.createElement("div");
-              head.className = "daily-report__head";
-              var headTitle = document.createElement("div");
-              headTitle.className = "card-title";
-              headTitle.textContent = displayLabel;
-              head.appendChild(headTitle);
-              var switchLabel = document.createElement("label");
-              switchLabel.className = "switch daily-report__head-switch";
-              var switchId = "tpl_v2_enabled_" + tpl.name.replace(/[^a-zA-Z0-9_-]/g, "_");
-              switchLabel.setAttribute("for", switchId);
-              switchLabel.innerHTML =
-                '<input type="checkbox" id="' +
-                switchId +
-                '" class="tpl-v2-template-switch" data-template-name="' +
-                tpl.name +
-                '" aria-label="Переключить шаблон"/>' +
-                '<span class="switch-ui" aria-hidden="true"></span>';
-              head.appendChild(switchLabel);
-              wrap.appendChild(head);
-            }
-            var bed = document.createElement("div");
-            bed.className = "block-editor-root";
-            bed.setAttribute("data-template-name", tpl.name);
-            wrap.appendChild(bed);
-            if (typeof window.BlockEditor === "function") {
-              var editor = new window.BlockEditor(bed, tpl.name);
-              bed._blockEditor = editor;
-              editor.init().catch(function (err) {
-                console.error("BlockEditor init failed", err);
-                bed.innerHTML = "<p class=\"error\">Не удалось загрузить конструктор</p>";
-              }).finally(function () {
-                var tplSwitch = wrap.querySelector('.tpl-v2-template-switch[data-template-name="' + tpl.name + '"]');
-                if (!tplSwitch || !bed._blockEditor) return;
-                tplSwitch.checked = !!bed._blockEditor.templateEnabled;
-                tplSwitch.addEventListener("change", function () {
-                  if (bed._blockEditor && typeof bed._blockEditor.onTemplateToggle === "function") {
-                    bed._blockEditor.onTemplateToggle(!!tplSwitch.checked);
-                  }
-                });
-              });
-            } else {
-              bed.innerHTML = "<p class=\"error\">Конструктор блоков не загружен</p>";
-            }
-          } else {
-            var lab = document.createElement("label");
-            wrap.appendChild(lab);
-            var ta = document.createElement("textarea");
-            ta.className = "tpl-v2-html";
-            ta.setAttribute("data-name", tpl.name);
-            ta.rows = 6;
-            ta.value = (tpl.override_html != null && tpl.override_html !== "")
-              ? tpl.override_html
-              : (tpl.default_html || "");
-            wrap.appendChild(ta);
-            var footer = document.createElement("div");
-            footer.className = "block-editor__footer tpl-v2-card__footer";
-            var st = document.createElement("span");
-            st.className = "block-editor__status";
-            footer.appendChild(st);
-            var actions = document.createElement("div");
-            actions.className = "block-editor__footer-actions";
-            ["Сохранить", "Сбросить", "Предпросмотр"].forEach(function (label, idx) {
-              var b = document.createElement("button");
-              b.type = "button";
-              b.textContent = label;
-              b.className = idx === 0 ? "btn btn-primary" : "btn btn-ghost";
-              if (idx === 0) {
-                b.classList.add("tpl-v2-save");
-                b.setAttribute("data-action", "save");
-              }
-              if (idx === 1) {
-                b.classList.add("tpl-v2-reset");
-                b.setAttribute("data-action", "reset");
-              }
-              if (idx === 2) b.classList.add("tpl-v2-preview");
-              b.setAttribute("data-name", tpl.name);
-              b.setAttribute("data-display-label", displayLabel);
-              actions.appendChild(b);
-            });
-            footer.appendChild(actions);
-            wrap.appendChild(footer);
-            var pre = document.createElement("pre");
-            pre.className = "tpl-v2-preview-out muted tpl-v2-preview-pre";
-            pre.setAttribute("data-name", tpl.name);
-            wrap.appendChild(pre);
-          }
+          autoResizeTextarea(ta);
+          ta.addEventListener("input", function () {
+            autoResizeTextarea(ta);
+            schedulePreview();
+          });
+          setTimeout(function () {
+            previewTemplate(tpl.name, function () { return ta.value; }, pre, reqToken);
+          }, 0);
+
           var mount = root;
           if (isDailyTemplate && dailyRoot) {
             mount = dailyRoot;
@@ -435,6 +475,11 @@
             }).then(function (resp) {
               if (!resp.ok) throw new Error("save_failed");
               statusEl.textContent = "Сохранено: " + label;
+              var card = btn.closest(".service-bubble, .daily-report__editor-wrap");
+              if (card) {
+                var badge = card.querySelector(".daily-report__head .muted");
+                if (badge) badge.textContent = sourceBadge("custom");
+              }
               showToast("Шаблон " + label + " сохранён", false);
             }).catch(function () {
               statusEl.textContent = "Ошибка сохранения " + label;
@@ -457,27 +502,6 @@
               loadV2();
             }).catch(function () {
               statusEl.textContent = "Ошибка сброса " + label;
-            });
-          });
-        });
-        tplScope.querySelectorAll(".tpl-v2-preview").forEach(function (btn) {
-          btn.addEventListener("click", function () {
-            var name = btn.getAttribute("data-name");
-            var ta = tplScope.querySelector('.tpl-v2-html[data-name="' + name + '"]');
-            var pre = tplScope.querySelector('.tpl-v2-preview-out[data-name="' + name + '"]');
-            fetch("/api/bot/notification-templates/preview", {
-              method: "POST",
-              credentials: "same-origin",
-              headers: {
-                "Content-Type": "application/json",
-                "X-CSRF-Token": csrfToken(),
-                Accept: "application/json"
-              },
-              body: JSON.stringify({ name: name, body_html: ta ? ta.value : "" })
-            }).then(function (resp) { return resp.json(); }).then(function (d) {
-              if (pre) pre.textContent = (d && d.html) ? String(d.html) : "";
-            }).catch(function () {
-              if (pre) pre.textContent = "Ошибка предпросмотра";
             });
           });
         });

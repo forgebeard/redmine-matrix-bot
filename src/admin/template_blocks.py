@@ -1,4 +1,12 @@
-"""Реестр блоков и compile/decompose Jinja для issue-шаблонов уведомлений (админка)."""
+"""ARCHIVED: legacy block-editor helpers for notification templates.
+
+Модуль исключен из активного runtime-контура вкладки «Уведомления» (code-only UX).
+Оставлен временно как архивный слой совместимости для безопасного перехода.
+
+Важно:
+- новые фичи в этот модуль не добавлять;
+- при следующем cleanup-цикле удалить целиком вместе с остаточными тестами.
+"""
 
 from __future__ import annotations
 
@@ -11,6 +19,7 @@ from typing import Any, Literal
 from bot.template_loader import read_default_file
 
 logger = logging.getLogger(__name__)
+ARCHIVED_TEMPLATE_BLOCKS = True
 
 
 @dataclass(frozen=True)
@@ -533,26 +542,6 @@ _BLOCK_LIST: list[BlockDef] = [
         order=0,
         decompose_full_body=True,
     ),
-    BlockDef(
-        id="dry_run_body",
-        label="Предпросмотр шаблона",
-        description="Одна задача в контексте предпросмотра",
-        template=read_default_file("tpl_dry_run") or "",
-        variables=[
-            "issue_url",
-            "issue_id",
-            "subject",
-            "project_name",
-            "status",
-            "priority",
-            "assignee_name",
-        ],
-        settings_schema={},
-        signature_pattern="",
-        default_enabled=True,
-        order=0,
-        decompose_full_body=True,
-    ),
 ]
 
 BLOCK_REGISTRY: dict[str, BlockDef] = {b.id: b for b in _BLOCK_LIST}
@@ -572,9 +561,6 @@ DEFAULT_BLOCK_CONFIGS: dict[str, list[BlockConfig]] = {
     ],
     "tpl_daily_report": [
         BlockConfig("daily_report_body", True, 0, {}),
-    ],
-    "tpl_dry_run": [
-        BlockConfig("dry_run_body", True, 0, {}),
     ],
 }
 

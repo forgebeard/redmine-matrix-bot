@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import os
 import re
@@ -19,7 +18,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from admin.env_manager import update_env_file_with_lock
 from database.models import AppSecret, CycleSettings
-from database.notification_template_repo import NOTIFICATION_TEMPLATE_LABELS
 from database.session import get_session
 from redmine_cache import check_redmine_access as check_redmine_access_cached
 from security import decrypt_secret, encrypt_secret, load_master_key
@@ -49,6 +47,10 @@ def _sanitize_matrix_device_id(raw: str) -> str:
 
 # Поля которые НЕ нужно маскировать (URL'ы и MXID)
 _UNMASKED_SECRETS = {"REDMINE_URL", "MATRIX_HOMESERVER", "MATRIX_USER_ID"}
+
+
+def _normalize_base_url(value: str) -> str:
+    return (value or "").strip().rstrip("/")
 
 
 def _check_redmine_access(url: str, api_key: str) -> tuple[bool, str]:
@@ -272,8 +274,6 @@ async def onboarding_page(request: Request, session: AsyncSession = Depends(get_
         except Exception:
             secrets_masked[row.name] = "••••••••"
 
-    from admin.template_blocks import BLOCK_EDITOR_TEMPLATES, registry_json_objects
-
     _notify_catalog, versions_catalog = await admin._load_catalogs(session)
     statuses_catalog = await admin._load_statuses_catalog(session)
     csrf_token, _ = admin._ensure_csrf(request)
@@ -284,13 +284,6 @@ async def onboarding_page(request: Request, session: AsyncSession = Depends(get_
     tz_all = admin._standard_timezone_options()
     tz_labels = admin._timezone_labels(tz_all)
     current_tz = await admin.effective_bot_timezone_for_admin(session)
-
-    block_editor_bootstrap = {
-        "registry": registry_json_objects(),
-        "editor_template_names": sorted(BLOCK_EDITOR_TEMPLATES),
-        "template_display_names": NOTIFICATION_TEMPLATE_LABELS,
-    }
-    block_editor_bootstrap_json = json.dumps(block_editor_bootstrap, ensure_ascii=False)
 
     return admin.templates.TemplateResponse(
         request,
@@ -306,7 +299,6 @@ async def onboarding_page(request: Request, session: AsyncSession = Depends(get_
             "timezone_all_options": tz_all,
             "timezone_labels": tz_labels,
             "service_timezone": current_tz,
-            "block_editor_bootstrap_json": block_editor_bootstrap_json,
         },
     )
 
@@ -326,6 +318,7 @@ async def onboarding_save(
     admin._verify_csrf(request, csrf_token)
 
     form = await request.form()
+    updated_redmine_url = ""
 
     for secret_name in _SECRET_NAMES:
         raw = form.get(f"secret_{secret_name}", "")
@@ -344,15 +337,34 @@ async def onboarding_save(
         if is_masked:
             logger.info("[DIAG] Save secret '%s': SKIPPING (masked, keeping old)", secret_name)
             continue
+        value_to_store = raw
+        if secret_name == "REDMINE_URL":
+            value_to_store = _normalize_base_url(raw)
+            updated_redmine_url = value_to_store
         logger.info("[DIAG] Save secret '%s': UPDATING (raw len=%d)", secret_name, len(raw))
         existing = await session.execute(select(AppSecret).where(AppSecret.name == secret_name))
         row = existing.scalar_one_or_none()
-        enc = encrypt_secret(raw, load_master_key())
+        enc = encrypt_secret(value_to_store, load_master_key())
         if row:
             row.ciphertext = enc.ciphertext
             row.nonce = enc.nonce
         else:
             session.add(AppSecret(name=secret_name, ciphertext=enc.ciphertext, nonce=enc.nonce))
+
+    # Single-URL UX: если оператор явно сохранил REDMINE_URL,
+    # синхронизируем ссылочную базу портала автоматически.
+    if updated_redmine_url:
+        existing = await session.execute(select(AppSecret).where(AppSecret.name == "PORTAL_BASE_URL"))
+        row = existing.scalar_one_or_none()
+        enc = encrypt_secret(updated_redmine_url, load_master_key())
+        if row:
+            row.ciphertext = enc.ciphertext
+            row.nonce = enc.nonce
+        else:
+            session.add(
+                AppSecret(name="PORTAL_BASE_URL", ciphertext=enc.ciphertext, nonce=enc.nonce)
+            )
+        logger.info("[DIAG] Save secret 'PORTAL_BASE_URL': SYNCED_FROM_REDMINE")
 
     tz_form = (form.get("service_timezone") or "").strip()
     if tz_form:

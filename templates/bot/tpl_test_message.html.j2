@@ -1,0 +1,3 @@
+<b>{{ title | default('Тестовое сообщение') }}</b><br>
+{{ message | default('Это тест от панели управления. Если вы это видите — подключение работает!') }}<br>
+<small>Отправлено: {{ sent_at | default('') }} ({{ timezone | default('Europe/Moscow') }})</small>

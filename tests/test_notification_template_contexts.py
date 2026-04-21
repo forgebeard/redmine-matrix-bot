@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+import bot.template_context as template_context
 from bot.digest_service import _aggregate_digest_items
 from bot.journal_handlers import build_journal_template_context, infer_event_type
+from bot.journal_pipeline import aggregate_journals_first_old_last_new
 from bot.template_context import build_issue_context
 from tests.conftest import MockIssue, MockJournal
 
@@ -93,3 +95,31 @@ def test_reminder_elapsed_rendered_as_text() -> None:
     issue.updated_on = datetime.now(UTC) - timedelta(hours=2, minutes=30)
     ctx = build_issue_context(issue, catalogs=None, elapsed_human="2 ч 30 мин")
     assert "2 ч" in ctx["elapsed_human"]
+
+
+def test_issue_url_falls_back_to_redmine_when_portal_empty(monkeypatch) -> None:
+    issue = MockIssue(issue_id=321)
+    monkeypatch.setattr(template_context, "PORTAL_BASE_URL", "")
+    monkeypatch.setattr(template_context, "REDMINE_URL", "https://support.red-soft.ru")
+    ctx = build_issue_context(issue, catalogs=None)
+    assert ctx["issue_url"] == "https://support.red-soft.ru/issues/321"
+
+
+def test_aggregate_journals_first_old_last_new() -> None:
+    j1 = MockJournal(
+        journal_id=101,
+        details=[{"name": "status_id", "old_value": "1", "new_value": "2"}],
+    )
+    j2 = MockJournal(
+        journal_id=102,
+        details=[
+            {"name": "status_id", "old_value": "2", "new_value": "13"},
+            {"name": "priority_id", "old_value": "2", "new_value": "3"},
+        ],
+    )
+    agg = aggregate_journals_first_old_last_new([j1, j2])
+    assert agg is not None
+    assert agg.id == 102
+    details = {d["name"]: d for d in agg.details}
+    assert details["status_id"]["old_value"] == "1"
+    assert details["status_id"]["new_value"] == "13"

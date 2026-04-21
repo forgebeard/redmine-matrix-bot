@@ -162,6 +162,28 @@ class TestEnsureTz:
         assert result.tzinfo == utc
 
 
+class TestLoggerHandlerGuards:
+    def test_has_console_handler_detects_stream_only(self):
+        import logging
+
+        log = logging.getLogger("test.logger.console.guard")
+        log.handlers = []
+        log.addHandler(logging.StreamHandler())
+        assert bot._has_console_handler(log) is True
+
+    def test_has_file_handler_detects_same_target(self, tmp_path):
+        import logging
+
+        p = tmp_path / "bot.log"
+        p.write_text("")
+        log = logging.getLogger("test.logger.file.guard")
+        log.handlers = []
+        fh = logging.FileHandler(p, encoding="utf-8")
+        log.addHandler(fh)
+        assert bot._has_file_handler(log, p) is True
+        assert bot._has_file_handler(log, tmp_path / "other.log") is False
+
+
 class TestShouldNotify:
     """Тесты фильтрации уведомлений по подписке."""
 
@@ -652,6 +674,63 @@ class TestRoomSendWithRetry:
 
         assert client.room_send.call_count == matrix_send.MAX_RETRIES
 
+    @pytest.mark.asyncio
+    async def test_rate_limited_uses_retry_after(self):
+        """429/M_LIMIT_EXCEEDED + retry_after_ms -> пауза из ответа."""
+        from nio.responses import RoomSendError
+
+        limited = RoomSendError.from_dict(
+            {"error": "Rate limited", "errcode": "M_LIMIT_EXCEEDED", "retry_after_ms": 2500},
+            "!room:server",
+        )
+        success = MagicMock()
+        success.event_id = "$ok"
+        success.__class__ = type("RoomSendResponse", (), {})
+
+        client = AsyncMock()
+        client.room_send = AsyncMock(side_effect=[limited, success])
+
+        with patch("matrix_send.asyncio.sleep", new_callable=AsyncMock) as sleep_mock:
+            await matrix_send.room_send_with_retry(client, "!room:server", {"msgtype": "m.text", "body": "x"})
+
+        sleep_mock.assert_awaited()
+        assert sleep_mock.await_args_list[0].args[0] == pytest.approx(2.5, rel=1e-3)
+
+    @pytest.mark.asyncio
+    async def test_non_retryable_4xx_stops_immediately(self):
+        from nio.responses import RoomSendError
+
+        forbidden = RoomSendError.from_dict(
+            {"error": "Forbidden", "errcode": "M_FORBIDDEN"},
+            "!room:server",
+        )
+        forbidden.status_code = 403
+        client = AsyncMock()
+        client.room_send = AsyncMock(return_value=forbidden)
+        with patch("matrix_send.asyncio.sleep", new_callable=AsyncMock) as sleep_mock:
+            with pytest.raises(RuntimeError):
+                await matrix_send.room_send_with_retry(client, "!room:server", {"msgtype": "m.text", "body": "x"})
+        assert client.room_send.call_count == 1
+        sleep_mock.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_maps_txn_id_to_tx_id_kwarg(self):
+        success = MagicMock()
+        success.event_id = "$ok"
+        success.__class__ = type("RoomSendResponse", (), {})
+        client = AsyncMock()
+        client.room_send = AsyncMock(return_value=success)
+
+        await matrix_send.room_send_with_retry(
+            client,
+            "!room:server",
+            {"msgtype": "m.text", "body": "x"},
+            txn_id="txn-123",
+        )
+
+        kwargs = client.room_send.call_args.kwargs
+        assert kwargs["tx_id"] == "txn-123"
+
 
 class TestSendMatrixMessage:
     """Тесты отправки сообщений в Matrix."""
@@ -720,8 +799,8 @@ class TestSendMatrixMessage:
         assert "просрочено" in content["formatted_body"]
 
     @pytest.mark.asyncio
-    async def test_extra_text_included(self, mock_matrix_client, simple_issue, matrix_message_session):
-        """Дополнительный текст попадает в HTML."""
+    async def test_status_change_uses_v5_lines(self, mock_matrix_client, simple_issue, matrix_message_session):
+        """status_change рендерится в v5-полях и plain fallback с `| `."""
         await bot.send_matrix_message(
             mock_matrix_client,
             simple_issue,
@@ -734,7 +813,9 @@ class TestSendMatrixMessage:
         content = (
             call_args[1]["content"] if "content" in call_args[1] else call_args.kwargs["content"]
         )
-        assert "В работе" in content["formatted_body"]
+        assert "Статус:" in content["formatted_body"]
+        assert content["body"].splitlines()[0].startswith("| ")
+        assert content["body"].splitlines()[-1].startswith("| ")
 
     @pytest.mark.asyncio
     async def test_subject_special_chars_escaped(self, mock_matrix_client, matrix_message_session):
@@ -797,6 +878,19 @@ class TestSendMatrixMessage:
                 )
 
         assert client.room_send.call_count == matrix_send.MAX_RETRIES
+
+    @pytest.mark.asyncio
+    async def test_txn_id_forwarded(self, mock_matrix_client, simple_issue, matrix_message_session):
+        await bot.send_matrix_message(
+            mock_matrix_client,
+            simple_issue,
+            "!room:server",
+            "new",
+            session=matrix_message_session,
+            txn_id="txn-abc",
+        )
+        kwargs = mock_matrix_client.room_send.call_args.kwargs
+        assert kwargs["tx_id"] == "txn-abc"
 
 
 class TestSendSafe:

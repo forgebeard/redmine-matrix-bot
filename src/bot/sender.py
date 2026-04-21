@@ -10,7 +10,7 @@ import html as html_module
 import logging
 import re
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -49,9 +49,39 @@ def _elapsed_human_since(dt: datetime | None) -> str:
         return f"{hours} ч {minutes} мин"
     return f"{minutes} мин"
 
+
+def _plain_prefixed(lines: list[str]) -> str:
+    out: list[str] = []
+    for line in lines:
+        if line:
+            out.append(f"| {line}")
+        else:
+            out.append("|")
+    return "\n".join(out)
+
+
+def _v5_plain_issue_update(context: dict[str, Any]) -> str:
+    issue_id = str(context.get("issue_id", "") or "")
+    subject = str(context.get("subject", "") or "").strip()
+    title = f"#{issue_id} — {subject}" if subject else f"#{issue_id}"
+    lines = [
+        "Задача обновлена",
+        title,
+        "",
+        f"Проект: {context.get('project_name') or '—'}",
+        f"Версия: {context.get('version_line') or context.get('version') or '—'}",
+        f"Статус: {context.get('status_line') or context.get('status') or '—'}",
+        f"Приоритет: {context.get('priority_line') or context.get('priority') or '—'}",
+        f"Исполнитель: {context.get('assignee_line') or context.get('assignee_name') or '—'}",
+        "",
+        str(context.get("issue_url", "") or ""),
+    ]
+    return _plain_prefixed(lines)
+
 # ── Config (заполняется из main.py при старте) ──────────────────────────────
 
 REDMINE_URL: str = ""
+PORTAL_BASE_URL: str = ""
 
 # ── Таймаут на создание DM-комнаты (секунды) ────────────────────────────────
 
@@ -344,7 +374,10 @@ async def _tpl_build_matrix_message_content(
         )
 
     html_out, plain_opt = await render_named_template(session, tpl_name, ctx)
-    plain_body = (plain_opt or "").strip() or _strip_html_to_plain(html_out)
+    if notification_type in {"issue_updated", "status_change"}:
+        plain_body = _v5_plain_issue_update(ctx)
+    else:
+        plain_body = (plain_opt or "").strip() or _strip_html_to_plain(html_out)
     return {
         "msgtype": "m.text",
         "body": plain_body,
@@ -380,13 +413,14 @@ async def send_matrix_message(
     extra_text: str = "",
     *,
     session: AsyncSession | None = None,
+    txn_id: str | None = None,
 ) -> None:
     """Формирует и отправляет HTML-сообщение в Matrix через tpl-шаблоны."""
     resolved_room = await _resolve_room_id(client, room_id)
     content = await build_matrix_message_content(
         issue, notification_type, extra_text=extra_text, session=session
     )
-    await room_send_with_retry(client, resolved_room, content)
+    await room_send_with_retry(client, resolved_room, content, txn_id=txn_id)
     logger.info("📨 #%s → %s... (%s)", issue.id, resolved_room[:20], notification_type)
 
 
@@ -398,6 +432,7 @@ async def send_safe(
     notification_type: str,
     extra_text: str = "",
     db_session: AsyncSession | None = None,
+    txn_id: str | None = None,
 ) -> None:
     """Обёртка: проверка DND/рабочих часов → отправка с перехватом ошибок."""
     from bot.logic import _cfg_for_room, _issue_priority_name, issue_matches_cfg
@@ -428,6 +463,7 @@ async def send_safe(
             notification_type,
             extra_text,
             session=db_session,
+            txn_id=txn_id,
         )
     except Exception as e:
         logger.error("❌ Ошибка отправки #%s → %s: %s", issue.id, room_id[:20], e)

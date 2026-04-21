@@ -149,20 +149,7 @@ async def check_user_issues(
             # ═══ 1. СМЕНА СТАТУСА ═══
             old_status = detect_status_change(issue, sent)
             if old_status:
-                if should_notify(user_cfg, "status_change"):
-                    extra = (
-                        f"Статус: <strong>{_safe_html(old_status)}</strong> "
-                        f"→ <strong>{_safe_html(issue.status.name)}</strong>"
-                    )
-                    await send_safe(
-                        client,
-                        issue,
-                        user_cfg,
-                        room,
-                        "status_change",
-                        extra_text=extra,
-                        db_session=db_session,
-                    )
+                # v5 cutover: статусные апдейты отправляются только через журналный движок.
                 sent[iid]["status"] = issue.status.name
                 changed_sent.add(iid)
 
@@ -308,19 +295,8 @@ async def check_user_issues(
                 can_notify_issue_updated=should_notify(user_cfg, "issue_updated"),
             )
             if journal_decision.should_send_update:
-                tail = descs[-5:]
-                combined = "<br/>".join(_safe_html(d) for d in tail)
-                if len(descs) > 5:
-                    combined = f"<em>...и ещё {len(descs) - 5}</em><br/>" + combined
-                await send_safe(
-                    client,
-                    issue,
-                    user_cfg,
-                    room,
-                    "issue_updated",
-                    extra_text=combined,
-                    db_session=db_session,
-                )
+                # v5 cutover: issue_updated отправляется только через журналный движок.
+                pass
             if journal_decision.should_update_last_seen:
                 journals[iid] = {"last_journal_id": max_id}
                 changed_journals.add(iid)

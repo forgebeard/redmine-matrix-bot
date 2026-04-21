@@ -9,7 +9,8 @@ from __future__ import annotations
 from typing import Any
 
 from bot.logic import get_version_name
-from bot.sender import REDMINE_URL
+from bot.sender import PORTAL_BASE_URL, REDMINE_URL
+from config import SUBJECT_MAX_LEN
 
 
 def _status_display(issue: Any, catalogs: Any | None) -> str:
@@ -44,11 +45,11 @@ def _version_display(issue: Any) -> str:
 
 
 def _project_display(issue: Any) -> str:
-    return str(getattr(getattr(issue, "project", None), "name", "") or "")
+    return str(getattr(getattr(issue, "project", None), "name", "") or "").strip() or "—"
 
 
 def _assignee_display(issue: Any) -> str:
-    return str(getattr(getattr(issue, "assigned_to", None), "name", "") or "")
+    return str(getattr(getattr(issue, "assigned_to", None), "name", "") or "").strip() or "—"
 
 
 def _description_excerpt(issue: Any, limit: int = 300) -> str:
@@ -68,6 +69,15 @@ def _due_date_display(issue: Any) -> str:
     return str(due)
 
 
+def _subject_display(issue: Any) -> str:
+    raw = str(getattr(issue, "subject", "") or "").strip()
+    if not raw:
+        return ""
+    if len(raw) <= SUBJECT_MAX_LEN:
+        return raw
+    return raw[: SUBJECT_MAX_LEN - 3].rstrip() + "..."
+
+
 def build_issue_context(
     issue: Any,
     catalogs: Any | None,
@@ -78,12 +88,13 @@ def build_issue_context(
         iid = int(getattr(issue, "id", 0) or 0)
     except Exception:
         iid = 0
-    base_url = (REDMINE_URL or "").rstrip("/")
+    portal_base = (PORTAL_BASE_URL or REDMINE_URL or "").rstrip("/")
+    base_url = portal_base
     issue_url = f"{base_url}/issues/{iid}" if base_url and iid else (f"/issues/{iid}" if iid else "")
     ctx: dict[str, Any] = {
         "issue_id": iid,
         "issue_url": issue_url,
-        "subject": str(getattr(issue, "subject", "") or ""),
+        "subject": _subject_display(issue),
         "project_name": _project_display(issue),
         "status": _status_display(issue, catalogs),
         "priority": _priority_display(issue, catalogs),

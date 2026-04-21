@@ -20,7 +20,7 @@ _TEMPLATE_NAMES = frozenset(
         "tpl_task_change",
         "tpl_reminder",
         "tpl_digest",
-        "tpl_dry_run",
+        "tpl_test_message",
         "tpl_daily_report",
     )
 )

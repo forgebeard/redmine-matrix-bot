@@ -14,6 +14,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from bot.template_loader import render_named_template
 from database.models import BotHeartbeat, BotUser, SupportGroup, UserVersionRoute
 from database.session import get_session
 from database.user_runtime_cleanup import delete_runtime_data_for_redmine_user
@@ -484,14 +485,17 @@ async def user_test_message(
 
         tz_eff = await admin.effective_bot_timezone_for_admin(session)
         ts = datetime.now(ZoneInfo(tz_eff)).strftime("%H:%M:%S")
-        html = (
-            f"<b>Тестовое сообщение</b><br>"
-            f"Это тест от панели управления.<br>"
-            f"Если вы это видите — подключение работает!<br>"
-            f"<small>Отправлено: {ts} ({tz_eff})</small>"
-        )
-        text_plain = (
-            f"Тестовое сообщение\nЭто тест от панели управления.\nОтправлено: {ts} ({tz_eff})"
+        context = {
+            "title": "Тестовое сообщение",
+            "message": "Это тест от панели управления. Если вы это видите — подключение работает!",
+            "sent_at": ts,
+            "timezone": tz_eff,
+            "scope": "user",
+        }
+        html, plain_opt = await render_named_template(session, "tpl_test_message", context)
+        text_plain = (plain_opt or "").strip() or (
+            f"{context['title']}\n{context['message']}\n"
+            f"Отправлено: {context['sent_at']} ({context['timezone']})"
         )
 
         logger.info("test_message: sending to %s", final_room_id)
