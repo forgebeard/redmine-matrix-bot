@@ -16,7 +16,7 @@
    - `info`, `overdue`, `issue_updated`, `status_change` → `tpl_task_change`
    - `reminder` → `tpl_reminder`
 2. Проверить предпросмотр в админке.
-3. Ключи `NOTIFY_TEMPLATE_*` в `cycle_settings` удаляются миграцией **`0022_daily_report_tpl`** (данные по типам событий уже должны быть в `notification_templates` после `0021` и работы в админке). API **`/api/bot/content`** больше не отдаёт и не сохраняет этот JSON.
+3. Ключи `NOTIFY_TEMPLATE_*` в `cycle_settings` удалены в ходе миграции на tpl-контур уведомлений; API **`/api/bot/content`** больше не отдаёт и не сохраняет этот JSON. В текущем дереве проекта ориентируйтесь на фактические ревизии в `alembic/versions/` (исторические номера `0021/0022` сохранены только как контекст).
 
 ## Legacy-код
 

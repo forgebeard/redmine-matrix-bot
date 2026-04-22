@@ -33,10 +33,18 @@ def _admin_db(client: TestClient):
 
 def test_removed_block_editor_endpoints_return_404(client: TestClient, _admin_db: None) -> None:
     cases = [
-        ("POST", "/api/bot/notification-templates/compile-blocks", {"template_name": "tpl_new_issue", "blocks": []}),
+        (
+            "POST",
+            "/api/bot/notification-templates/compile-blocks",
+            {"template_name": "tpl_new_issue", "blocks": []},
+        ),
         ("GET", "/api/bot/notification-templates/block-registry", None),
         ("GET", "/api/bot/notification-templates/tpl_new_issue/decompose", None),
-        ("POST", "/api/bot/notification-templates/tpl_new_issue/decompose-body", {"body_html": "<p>x</p>"}),
+        (
+            "POST",
+            "/api/bot/notification-templates/tpl_new_issue/decompose-body",
+            {"body_html": "<p>x</p>"},
+        ),
     ]
     for method, url, payload in cases:
         if method == "GET":
@@ -55,7 +63,7 @@ def test_preview_code_only_ok(client: TestClient, _admin_db: None) -> None:
     assert resp.status_code == 200
     data = resp.json()
     assert data.get("ok") is True
-    assert "issue" in str(data.get("html") or "")
+    assert "101" in str(data.get("html") or "")
 
 
 def test_preview_code_only_error(client: TestClient, _admin_db: None) -> None:
@@ -66,8 +74,8 @@ def test_preview_code_only_error(client: TestClient, _admin_db: None) -> None:
     )
     assert resp.status_code == 400
     data = resp.json()
-    assert data.get("ok") is False
-    assert "error" in data
+    assert "detail" in data
+    assert "Ошибка рендера" in str(data.get("detail", ""))
 
 
 def test_preview_tpl_test_message_ok(client: TestClient, _admin_db: None) -> None:
@@ -118,7 +126,9 @@ def test_default_custom_contract_save_and_reset(client: TestClient, _admin_db: N
     assert row2["default_html"] is not None
 
 
-def test_notification_templates_list_includes_display_name(client: TestClient, _admin_db: None) -> None:
+def test_notification_templates_list_includes_display_name(
+    client: TestClient, _admin_db: None
+) -> None:
     resp = client.get("/api/bot/notification-templates")
     assert resp.status_code == 200
     data = resp.json()

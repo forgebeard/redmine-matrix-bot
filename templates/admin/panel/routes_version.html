@@ -14,7 +14,7 @@
         <td>{{ r.version_key }}</td>
         <td>{{ room_cell(r.room_id) }}</td>
         <td class="table-actions">
-          <form method="post" action="/routes/version/{{ r.id }}/delete" class="form-inline-delete" hx-confirm="Удалить?">
+          <form method="post" action="/settings/routes/version/{{ r.id }}/delete" class="form-inline-delete" hx-confirm="Удалить?">
             <input type="hidden" name="csrf_token" value="{{ request.state._state.get('csrf_token', '') }}"/>
             <button type="submit" class="btn btn-danger">Удалить</button>
           </form>
@@ -29,7 +29,7 @@
 
 <div class="card card--mt">
   <h2 class="card__title--flush">Добавить</h2>
-  <form class="form" method="post" action="/routes/version">
+  <form class="form" method="post" action="/settings/routes/version">
     <input type="hidden" name="csrf_token" value="{{ request.state._state.get('csrf_token', '') }}"/>
     <div class="field">
       <label for="version_key">Ключ версии</label>

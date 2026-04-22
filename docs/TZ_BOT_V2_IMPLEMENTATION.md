@@ -58,7 +58,7 @@
 | `DRAIN_MAX_USERS_PER_TICK` | Лимит пользователей на drain digest |
 | `JOURNAL_ENGINE_ENABLED` | Вкл/выкл журнального движка |
 
-Сиды добавлены миграцией [`0021_journal_engine_v2`](../alembic/versions/20260418_0021_journal_engine_v2.py).
+Ключи присутствуют в актуальной схеме БД; в текущем дереве Alembic используется initial-ревизия.
 
 ## Шаблоны
 
@@ -74,4 +74,4 @@
 
 ## Миграции
 
-Ревизия **0021_journal_engine_v2**: курсор журнала, digest, watcher cache, шаблоны, колонки маршрутов, поля `bot_issue_state`, `support_groups.notify_on_assignment`.
+Исторические инкрементальные ревизии этапа v2 объединены в текущем состоянии проекта в initial-цепочку Alembic; при чтении этого документа ориентироваться на фактические файлы в `alembic/versions/`.

@@ -95,15 +95,15 @@ flowchart TD
 | Действие | Таблицы |
 |----------|---------|
 | Создание / правка группы | **`support_groups`**: комната группы, фильтры `notify` / `versions` / `priorities` в JSONB |
-| Маршруты статусов/версий из карточки группы | **`group_version_routes`**, при необходимости строки в **`status_room_routes`** через legacy POST из [`routes_mgmt`](../src/admin/routes/routes_mgmt.py) |
+| Маршруты статусов/версий из карточки группы | **`group_version_routes`**, строки в **`status_room_routes`** — только формы `/groups/{id}/status-routes/*` ([`groups.py`](../src/admin/routes/groups.py)) |
 | Удаление группы | DELETE **`support_groups`**; у пользователей `group_id` → NULL; каскад по маршрутам группы |
 
 ---
 
 ## 6. Глобальные маршруты версий и статусов
 
-- Роуты в [`routes_mgmt`](../src/admin/routes/routes_mgmt.py) пишут в **`status_room_routes`** и **`version_room_routes`** (глобальная карта «ключ Redmine → комната Matrix»).
-- Некоторые старые URL перенаправляют на `/groups` — см. комментарии в коде.
+- [`routes_mgmt`](../src/admin/routes/routes_mgmt.py): формы **`version_room_routes`** (глобальная карта «версия Redmine → комната Matrix») на **`/settings/routes/version`** (старый `GET /routes/version` → 301); **`status_room_routes`** настраиваются только из карточки группы.
+- `GET /routes/status` остаётся редиректом на `/groups` для старых закладок (без POST).
 
 ---
 

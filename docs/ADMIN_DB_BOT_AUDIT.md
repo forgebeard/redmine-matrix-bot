@@ -12,7 +12,8 @@
 | Тексты Matrix и утреннего отчёта (tpl v2) | вкладка «Уведомления» onboarding, API [`/api/bot/notification-templates`](../src/admin/routes/notification_templates.py) | `notification_templates` + файлы `templates/bot/tpl_*.html.j2` | [`render_named_template`](../src/bot/template_loader.py), [`scheduler.daily_report`](../src/bot/scheduler.py) для `tpl_daily_report` |
 | Пользователи бота | `/users` | `bot_users` (`BotUser`), опционально ключ в колонках ciphertext | [`fetch_runtime_config`](../src/database/load_config.py) |
 | Группы поддержки | `/groups` | `support_groups`, `group_version_routes` | то же |
-| Маршруты: статус→комната, версия→комната (глобально) | `/routes` ([`routes_mgmt`](../src/admin/routes/routes_mgmt.py)) | `status_room_routes`, `version_room_routes` | `fetch_runtime_config` |
+| Маршруты: статус→комната | `/groups` (формы `/groups/{id}/status-routes/*` в [`groups.py`](../src/admin/routes/groups.py)) | `status_room_routes` | `fetch_runtime_config` |
+| Маршруты: версия→комната (глобально) | `/settings/routes/version` ([`routes_mgmt`](../src/admin/routes/routes_mgmt.py)) | `version_room_routes` | `fetch_runtime_config` |
 | Доп. маршруты версий | формы пользователя/группы | `user_version_routes`, `group_version_routes` | то же |
 | Справочники Redmine | каталог в админке [`catalog`](../src/admin/routes/catalog.py) | `redmine_statuses`, `redmine_versions`, `redmine_priorities`, `notification_types` | [`load_catalogs`](../src/bot/catalogs.py) |
 | Аккаунты панели (логин) | `/app-users` и др. | `bot_app_users`, `bot_sessions`, … | Не используются ботом для рассылки |

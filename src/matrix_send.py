@@ -1,7 +1,7 @@
 """
 Единая отправка m.room.message в Matrix: повторы и экспоненциальный backoff.
 
-Используется и корневым bot.py (свой AsyncClient), и matrix_client (singleton).
+Используется ботом и админскими маршрутами test-message через общий retry-контур.
 
 Ответ успешной отправки в nio обычно содержит event_id; ошибки — RoomSendError
 или ответ с status_code без event_id. В тестах nio подменяют, поэтому проверка
@@ -25,7 +25,7 @@ def _log_matrix_send_response(resp, room_id: str, *, prefix: str = "Matrix room_
         if val is not None:
             parts.append(f"{key}={val!r}")
     if isinstance(resp, RoomSendError):
-        parts.append(f"type=RoomSendError")
+        parts.append("type=RoomSendError")
     logger.warning("; ".join(parts))
 
 

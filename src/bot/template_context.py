@@ -90,7 +90,9 @@ def build_issue_context(
         iid = 0
     portal_base = (PORTAL_BASE_URL or REDMINE_URL or "").rstrip("/")
     base_url = portal_base
-    issue_url = f"{base_url}/issues/{iid}" if base_url and iid else (f"/issues/{iid}" if iid else "")
+    issue_url = (
+        f"{base_url}/issues/{iid}" if base_url and iid else (f"/issues/{iid}" if iid else "")
+    )
     ctx: dict[str, Any] = {
         "issue_id": iid,
         "issue_url": issue_url,
@@ -118,6 +120,7 @@ def preview_issue_context_demo(**overrides: Any) -> dict[str, Any]:
 
     # Sync keys with build_issue_context (issue branch).
     """
+
     class _FakeIssue:
         id = 101
         subject = "Пример темы"
@@ -139,7 +142,10 @@ def preview_issue_context_demo(**overrides: Any) -> dict[str, Any]:
         def priority_name(self, rid: int, default: str = "?") -> str:
             return {2: "Нормальный"}.get(rid, default)
 
-    ctx = build_issue_context(_FakeIssue(), _FakeCats())
+    fake_issue = _FakeIssue()
+    ctx = build_issue_context(fake_issue, _FakeCats())
+    # Для шаблонов с точечной нотацией `issue.*` (предпросмотр в админке).
+    ctx["issue"] = fake_issue
     ctx.update(
         {
             "emoji": "",

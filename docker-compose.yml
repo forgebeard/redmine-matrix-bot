@@ -57,6 +57,27 @@ services:
       - "127.0.0.1:5433:5432"
 
   # ---------------------------------------------------------------------------
+  # Миграции БД: одноразовый шаг перед стартом bot/admin.
+  # ---------------------------------------------------------------------------
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: "no"
+    depends_on:
+      init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-bot}:${POSTGRES_PASSWORD_URLENC:-${POSTGRES_PASSWORD}}@postgres:5432/${POSTGRES_DB:-via}
+    command: ["alembic", "upgrade", "head"]
+    working_dir: /app
+    user: bot
+
+  # ---------------------------------------------------------------------------
   # Бот: собирается из Dockerfile в этом репозитории.
   # ---------------------------------------------------------------------------
   bot:
@@ -69,6 +90,8 @@ services:
         condition: service_completed_successfully
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     env_file:
       - .env
     environment:
@@ -127,6 +150,8 @@ services:
         condition: service_completed_successfully
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       docker-socket-proxy:
         condition: service_started
     env_file:
@@ -143,7 +168,7 @@ services:
       [
         "sh",
         "-c",
-        "alembic upgrade head && exec uvicorn src.admin.main:app --host 0.0.0.0 --port 8080",
+        "exec uvicorn src.admin.main:app --host 0.0.0.0 --port 8080",
       ]
     ports:
       - "${ADMIN_PORT:-8080}:8080"

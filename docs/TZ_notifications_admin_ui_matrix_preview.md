@@ -35,4 +35,4 @@
 
 ## Риски
 
-Параллельные ветки, затрагивающие `scheduler.py`, `template_blocks.py`, `tpl_daily_report.html.j2`, onboarding — согласовать порядок мержа.
+Параллельные ветки, затрагивающие `scheduler.py`, ~~`template_blocks.py`~~ (удалён в Act 2), `tpl_daily_report.html.j2`, onboarding — согласовать порядок мержа.

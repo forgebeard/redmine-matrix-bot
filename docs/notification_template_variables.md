@@ -6,6 +6,7 @@
 
 - Вкладка `Уведомления` работает только в режиме `код + preview` для всех `tpl_*`.
 - `tpl_dry_run` удалён из активного контура (реестр/API/UI); для тестовой проверки доставки используется `tpl_test_message`.
+- Единый runtime-путь отправки Matrix использует `src/matrix_send.py` (legacy-модуль `src/matrix_client.py` удалён).
 - Сохранение (`PUT /api/bot/notification-templates/{name}`) записывает `override_html` в БД.
 - Сброс (`POST /api/bot/notification-templates/{name}/reset`) удаляет override и возвращает файловый default.
 - Live-preview использует `POST /api/bot/notification-templates/preview`; при ошибке рендера UI показывает текст ошибки и не зависает в `loading`.

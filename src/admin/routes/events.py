@@ -1,4 +1,4 @@
-"""Events routes: /events, /events/export.csv, /audit redirects."""
+"""Events routes: /events and /events/export.csv."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import re
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, Response
 
 from events_log_display import (
     events_log_to_csv_bytes,
@@ -152,20 +152,6 @@ async def events_page(
     )
 
 
-# ── GET /audit (redirect) ───────────────────────────────────────────────────
-
-
-@router.get("/audit")
-async def audit_legacy_redirect(request: Request):
-    """Старый URL: журнал перенесён на /events."""
-    user = getattr(request.state, "current_user", None)
-    if not user or getattr(user, "role", "") != "admin":
-        raise HTTPException(403, "Только admin")
-    q = request.url.query
-    loc = f"/events?{q}" if q else "/events"
-    return RedirectResponse(loc, status_code=303)
-
-
 # ── GET /events/export.csv ───────────────────────────────────────────────────
 
 
@@ -194,17 +180,3 @@ async def events_export_csv(
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="events_log_{stamp}.csv"'},
     )
-
-
-# ── GET /audit/export.csv (redirect) ─────────────────────────────────────────
-
-
-@router.get("/audit/export.csv")
-async def audit_export_legacy_redirect(request: Request):
-    """Старый URL: выгрузка перенесена на /events/export.csv."""
-    user = getattr(request.state, "current_user", None)
-    if not user or getattr(user, "role", "") != "admin":
-        raise HTTPException(403, "Только admin")
-    q = request.url.query
-    loc = f"/events/export.csv?{q}" if q else "/events/export.csv"
-    return RedirectResponse(loc, status_code=303)

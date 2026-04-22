@@ -33,4 +33,4 @@ ignore = [
 ]
 
 [lint.isort]
-known-first-party = ["src", "database", "security", "config", "mail", "matrix_client", "matrix_send", "preferences", "admin_main", "bot"]
+known-first-party = ["src", "database", "security", "config", "mail", "matrix_send", "preferences", "admin_main", "bot"]

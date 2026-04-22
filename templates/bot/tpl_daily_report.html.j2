@@ -1,18 +1,10 @@
-{# Контекст: report_date, total_open, info_count, overdue_count, info_items_html, overdue_items_html (см. scheduler.daily_report) #}
-<h3>Утренний отчёт на {{ report_date }}</h3>
-<p><strong>Открытых задач:</strong> {{ total_open }}</p>
-<p><strong>Информация предоставлена:</strong> {{ info_count }} · <strong>Просрочено:</strong> {{ overdue_count }}</p>
+📋 Утренний отчёт на {{ report_date | default('—') }}
 
-<h4>Задачи в статусе «Информация предоставлена»</h4>
-{% if info_items_html | default('') %}
-{{ info_items_html | safe }}
-{% else %}
-<p>Нет задач в этом статусе.</p>
-{% endif %}
+Открытых задач: {{ total_open | default(0) }}
+Информация предоставлена: {{ info_count | default(0) }} · Просрочено: {{ overdue_count | default(0) }}
 
-<h4>Просроченные задачи</h4>
-{% if overdue_items_html | default('') %}
-{{ overdue_items_html | safe }}
-{% else %}
-<p>Просроченных задач нет.</p>
-{% endif %}
+Задачи в статусе «Информация предоставлена»
+{% if info_items_plain | default('') %}{{ info_items_plain }}{% else %}Нет задач в этом статусе.{% endif %}
+
+Просроченные задачи
+{% if overdue_items_plain | default('') %}{{ overdue_items_plain }}{% else %}Просроченных задач нет.{% endif %}

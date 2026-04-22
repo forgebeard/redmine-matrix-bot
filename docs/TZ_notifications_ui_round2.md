@@ -18,7 +18,7 @@
 - [`static/admin/js/onboarding.js`](static/admin/js/onboarding.js)
 - [`static/admin/js/template_block_editor.js`](static/admin/js/template_block_editor.js)
 - [`static/admin/css/template_block_editor.css`](static/admin/css/template_block_editor.css)
-- [`src/admin/template_blocks.py`](src/admin/template_blocks.py)
+- ~~`src/admin/template_blocks.py`~~ — модуль удалён в Act 2 (sunset block-editor); см. git history и [ADR_unified_notification_templates.md](ADR_unified_notification_templates.md).
 
 ## 3. Требования
 

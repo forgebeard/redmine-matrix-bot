@@ -8,6 +8,7 @@
 2. **`tpl_test_message`** — отдельный шаблон для тестовой отправки из админки (`/users/test-message`, `/groups/test-message`), не смешивается с рабочими event-шаблонами.
 3. **`tpl_dry_run`** — выведен из runtime-контракта (удалён из реестра, API и шаблонов); любые старые override-строки считаются orphan и очищаются миграцией.
 4. **`sandbox_accepts_context`** в [`template_loader.py`](../src/bot/template_loader.py) — вынесено в бэклог: сейчас парсит только дефолтный файл с диска, не override из БД.
+5. **Transport Matrix** — единый путь отправки через [`matrix_send.py`](../src/matrix_send.py); legacy-обёртка `src/matrix_client.py` удалена, чтобы исключить дублирующие входы.
 
 ## Вызовы `render_named_template`
 

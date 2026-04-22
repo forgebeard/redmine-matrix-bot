@@ -14,28 +14,6 @@ import admin.main as admin_main  # noqa: E402
 from tests.conftest import _setup_and_login_admin
 
 
-def test_audit_legacy_redirects_unauthenticated(client: TestClient):
-    r = client.get("/audit", follow_redirects=False)
-    assert r.status_code == 303
-    # Неаутентифицированные пользователи редиректятся на /setup (первичная настройка)
-    assert "/setup" in (r.headers.get("location") or "") or "/login" in (
-        r.headers.get("location") or ""
-    )
-
-
-def test_audit_legacy_redirects_to_events_for_admin(client: TestClient):
-    db_url = os.getenv("DATABASE_URL", "")
-    if not str(db_url).startswith("postgresql://"):
-        pytest.skip("Тест требует Postgres (DATABASE_URL)")
-    _setup_and_login_admin(client)
-    r = client.get("/audit?date_from=2024-01-02", follow_redirects=False)
-    if r.status_code not in (303, 302):
-        pytest.skip("Нет доступа к редиректу /audit")
-    loc = r.headers.get("location") or ""
-    assert loc.startswith("/events")
-    assert "date_from=2024-01-02" in loc
-
-
 def test_events_page_includes_events_table(client: TestClient):
     db_url = os.getenv("DATABASE_URL", "")
     if not str(db_url).startswith("postgresql://"):
@@ -47,6 +25,64 @@ def test_events_page_includes_events_table(client: TestClient):
     assert "События" in r.text
     assert "Дата" in r.text and "Уровень" in r.text and "Сообщение" in r.text
     assert "Всего по фильтру:" in r.text
+
+
+def test_events_page_echoes_date_from_query(client: TestClient):
+    db_url = os.getenv("DATABASE_URL", "")
+    if not str(db_url).startswith("postgresql://"):
+        pytest.skip("Тест требует Postgres (DATABASE_URL)")
+    _setup_and_login_admin(client)
+    r = client.get("/events?date_from=2024-01-02")
+    if r.status_code != 200:
+        pytest.skip("Нет доступа к /events")
+    assert 'name="date_from" value="2024-01-02"' in r.text
+
+
+def test_routes_status_legacy_get_redirects_for_admin(client: TestClient):
+    db_url = os.getenv("DATABASE_URL", "")
+    if not str(db_url).startswith("postgresql://"):
+        pytest.skip("Тест требует Postgres (DATABASE_URL)")
+    _setup_and_login_admin(client)
+    r = client.get("/routes/status", follow_redirects=False)
+    assert r.status_code == 303
+    loc = r.headers.get("location") or ""
+    assert loc.endswith("/groups")
+
+
+def test_routes_version_legacy_get_redirects_301_for_admin(client: TestClient):
+    db_url = os.getenv("DATABASE_URL", "")
+    if not str(db_url).startswith("postgresql://"):
+        pytest.skip("Тест требует Postgres (DATABASE_URL)")
+    _setup_and_login_admin(client)
+    r = client.get("/routes/version", follow_redirects=False)
+    assert r.status_code == 301
+    loc = r.headers.get("location") or ""
+    assert loc.endswith("/settings/routes/version")
+
+
+def test_settings_routes_version_page_for_admin(client: TestClient):
+    db_url = os.getenv("DATABASE_URL", "")
+    if not str(db_url).startswith("postgresql://"):
+        pytest.skip("Тест требует Postgres (DATABASE_URL)")
+    _setup_and_login_admin(client)
+    r = client.get("/settings/routes/version")
+    if r.status_code != 200:
+        pytest.skip("Нет доступа к /settings/routes/version")
+    assert "Версии по комнатам" in r.text
+
+
+def test_routes_version_legacy_post_returns_410(client: TestClient):
+    db_url = os.getenv("DATABASE_URL", "")
+    if not str(db_url).startswith("postgresql://"):
+        pytest.skip("Тест требует Postgres (DATABASE_URL)")
+    _setup_and_login_admin(client)
+    token = client.cookies.get("admin_csrf", "")
+    r = client.post(
+        "/routes/version",
+        data={"version_key": "x", "room_id": "!room:server", "csrf_token": token or ""},
+        follow_redirects=False,
+    )
+    assert r.status_code == 410
 
 
 def test_health_ok(client: TestClient):

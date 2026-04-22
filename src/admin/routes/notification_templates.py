@@ -34,29 +34,29 @@ def _mock_context_for_preview(name: str) -> dict[str, Any]:
     # tpl_digest — отдельный контракт, не issue-«полный контекст».
     if name == "tpl_digest":
         digest_items = [
-                {
-                    "issue_id": 1,
-                    "subject": "Задача A",
-                    "events": ["comment", "status_change"],
-                    "status_name": "В работе",
-                    "assigned_to": "Иван Петров",
-                    "changes": [{"field": "Статус", "old": "Новая", "new": "В работе"}],
-                    "comments": ["Уточнил требования"],
-                    "reminders_count": 0,
-                    "url": "https://redmine.example/issues/1",
-                },
-                {
-                    "issue_id": 2,
-                    "subject": "Задача B",
-                    "events": ["reminder"],
-                    "status_name": "Информация предоставлена",
-                    "assigned_to": "Мария Иванова",
-                    "changes": [],
-                    "comments": [],
-                    "reminders_count": 2,
-                    "url": "https://redmine.example/issues/2",
-                },
-            ]
+            {
+                "issue_id": 1,
+                "subject": "Задача A",
+                "events": ["comment", "status_change"],
+                "status_name": "В работе",
+                "assigned_to": "Иван Петров",
+                "changes": [{"field": "Статус", "old": "Новая", "new": "В работе"}],
+                "comments": ["Уточнил требования"],
+                "reminders_count": 0,
+                "url": "https://redmine.example/issues/1",
+            },
+            {
+                "issue_id": 2,
+                "subject": "Задача B",
+                "events": ["reminder"],
+                "status_name": "Информация предоставлена",
+                "assigned_to": "Мария Иванова",
+                "changes": [],
+                "comments": [],
+                "reminders_count": 2,
+                "url": "https://redmine.example/issues/2",
+            },
+        ]
         return {
             "items": digest_items,
             "digest_items": digest_items,
@@ -67,8 +67,8 @@ def _mock_context_for_preview(name: str) -> dict[str, Any]:
             "total_open": 12,
             "info_count": 2,
             "overdue_count": 1,
-            "info_items_html": "<ul><li><a href=\"#\">#101</a> — Пример «инфо»</li></ul>",
-            "overdue_items_html": "<ul><li><a href=\"#\">#202</a> — Просроченная (3 дня)</li></ul>",
+            "info_items_html": '<ul><li><a href="#">#101</a> — Пример «инфо»</li></ul>',
+            "overdue_items_html": '<ul><li><a href="#">#202</a> — Просроченная (3 дня)</li></ul>',
         }
     if name == "tpl_test_message":
         return {
@@ -87,6 +87,31 @@ def _mock_context_for_preview(name: str) -> dict[str, Any]:
             elapsed_human="4 ч 15 мин",
         )
     return preview_issue_context_demo()
+
+
+_BLOCK_EDITOR_REMOVED = "Block editor API удалён; см. ADR_unified_notification_templates."
+
+
+@router.get("/api/bot/notification-templates/block-registry", response_class=JSONResponse)
+async def notification_templates_block_registry_removed():
+    raise HTTPException(404, _BLOCK_EDITOR_REMOVED)
+
+
+@router.post("/api/bot/notification-templates/compile-blocks", response_class=JSONResponse)
+async def notification_templates_compile_blocks_removed():
+    raise HTTPException(404, _BLOCK_EDITOR_REMOVED)
+
+
+@router.get("/api/bot/notification-templates/{name}/decompose", response_class=JSONResponse)
+async def notification_templates_decompose_get_removed(name: str):
+    del name  # путь зарезервирован под удалённый block-editor
+    raise HTTPException(404, _BLOCK_EDITOR_REMOVED)
+
+
+@router.post("/api/bot/notification-templates/{name}/decompose-body", response_class=JSONResponse)
+async def notification_templates_decompose_body_removed(name: str):
+    del name
+    raise HTTPException(404, _BLOCK_EDITOR_REMOVED)
 
 
 @router.get("/api/bot/notification-templates", response_class=JSONResponse)

@@ -46,7 +46,6 @@ jobs:
       - name: pytest (unit + API, без Playwright)
         run: |
           alembic upgrade head
-          alembic downgrade -1 || true
           alembic upgrade head
           python -m pytest tests/ -q --tb=short --ignore=tests/e2e --cov=src --cov-report=term-missing --cov-fail-under=50
 

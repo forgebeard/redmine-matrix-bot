@@ -11,8 +11,8 @@ chmod +x deploy.sh && ./deploy.sh
 ```
 
 **Что делает `deploy.sh`:**
-1. Создаёт `.env` из шаблона (если отсутствует).
-2. Генерирует `POSTGRES_PASSWORD` и `APP_MASTER_KEY`.
+1. Создаёт/дополняет `.env` при первом запуске.
+2. Генерирует `POSTGRES_PASSWORD` и `APP_MASTER_KEY` (через init/openSSL fallback).
 3. Запускает PostgreSQL, веб-панель и бота.
 
 После запуска:
@@ -101,7 +101,7 @@ Via/
 ├── templates/
 │   ├── admin/                   # Панель администратора
 │   └── bot/tpl_*.html.j2        # Именованные шаблоны Matrix / журнала
-├── alembic/                     # 18 миграций БД
+├── alembic/                     # Ревизии БД Alembic (в текущем дереве: initial schema)
 ├── tests/                       # 31 файл: pytest + Playwright E2E
 └── docs/                        # ADMINISTRATOR_GUIDE, DEPLOYMENT, etc.
 ```
@@ -162,7 +162,7 @@ python -m pytest tests/e2e/ -v --tb=short
 Во вкладке `Уведомления` используется единый **code-only** UX для всех шаблонов `tpl_*`:
 
 - один редактор кода + live preview Matrix;
-- автопредпросмотр с debounce (`~400ms`) и кнопка `Обновить предпросмотр` как fallback;
+- автопредпросмотр с debounce (`~400ms`);
 - `Сохранить` пишет `custom override` в БД (`notification_templates.body_html`);
 - `Сбросить` удаляет override и возвращает файловый default из `templates/bot/tpl_*.html.j2`.
 

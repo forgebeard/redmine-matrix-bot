@@ -12,7 +12,7 @@
 
 ## Утренний отчёт (`daily_report`)
 
-Текст сообщения рендерится через **`tpl_daily_report`** (`render_named_template` + таблица `notification_templates` + файл `templates/bot/tpl_daily_report.html.j2`), как и остальные tpl. Расписание (`DAILY_REPORT_ENABLED`, `DAILY_REPORT_HOUR`, `DAILY_REPORT_MINUTE`) остаётся в **`cycle_settings`**; правка с вкладки «Уведомления» onboarding через `/api/bot/content`. Шаблоны HTML/plain отчёта в `cycle_settings` (`DAILY_REPORT_HTML_TEMPLATE` / `PLAIN`) **удалены**: перенос в БД выполняет миграция `0022_daily_report_tpl`. Тип `daily_report` по-прежнему **не** входит в `EVENT_TO_TEMPLATE` (отдельный путь `scheduler.daily_report`).
+Текст сообщения рендерится через **`tpl_daily_report`** (`render_named_template` + таблица `notification_templates` + файл `templates/bot/tpl_daily_report.html.j2`), как и остальные tpl. Расписание (`DAILY_REPORT_ENABLED`, `DAILY_REPORT_HOUR`, `DAILY_REPORT_MINUTE`) остаётся в **`cycle_settings`**; правка выполняется из onboarding. Шаблоны HTML/plain отчёта в `cycle_settings` (`DAILY_REPORT_HTML_TEMPLATE` / `PLAIN`) удалены при переходе на tpl-контур (историческая миграция; в текущем дереве ориентироваться на фактические ревизии в `alembic/versions/`). Тип `daily_report` по-прежнему **не** входит в `EVENT_TO_TEMPLATE` (отдельный путь `scheduler.daily_report`).
 
 ## Ручной чеклист перед релизом (Matrix + админка)
 

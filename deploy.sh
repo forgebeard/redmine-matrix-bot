@@ -37,6 +37,16 @@ if ! docker compose up --build -d; then
     exit 1
 fi
 
+# Дожидаемся завершения миграций (one-shot service) до проверки health runtime-сервисов.
+if docker compose ps --services 2>/dev/null | grep -q "^migrate$"; then
+    echo "[DEPLOY] 🗄 Waiting for DB migrations to complete..."
+    if ! docker compose wait migrate; then
+        echo "[DEPLOY] ❌ Миграции БД завершились с ошибкой"
+        echo "[DEPLOY] Логи: docker compose logs migrate admin postgres"
+        exit 1
+    fi
+fi
+
 # Ждём healthy status
 echo "[DEPLOY] ⏳ Waiting for services to be ready..."
 MAX_WAIT=120
