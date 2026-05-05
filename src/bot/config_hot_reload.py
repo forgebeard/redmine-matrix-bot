@@ -239,6 +239,7 @@ def apply_snapshot_to_runtime(
     main_mod.BOT_TZ = snap.bot_tz
     main_mod.MATRIX_DEVICE_ID = snap.matrix_device_id
 
+
 def reschedule_after_reload(
     scheduler: AsyncIOScheduler,
     snap: BotRuntimeSnapshot,

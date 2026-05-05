@@ -100,7 +100,9 @@ from admin.routes.events import router as events_router  # noqa: E402
 from admin.routes.groups import router as groups_router  # noqa: E402
 from admin.routes.health import router as health_router  # noqa: E402
 from admin.routes.me import router as me_router  # noqa: E402
-from admin.routes.notification_templates import router as notification_templates_router  # noqa: E402
+from admin.routes.notification_templates import (  # noqa: E402
+    router as notification_templates_router,
+)
 from admin.routes.ops import router as ops_router  # noqa: E402
 from admin.routes.redmine import router as redmine_router  # noqa: E402
 from admin.routes.routes_mgmt import router as routes_mgmt_router  # noqa: E402

@@ -91,9 +91,7 @@ async def bot_content_save(
         raise HTTPException(403, "Только admin")
 
     enabled = str(daily_report_enabled).strip().lower() in ("1", "true", "on", "yes")
-    await _upsert_cycle_setting(
-        session, _KEYS["daily_report_enabled"], _to_bool_str(enabled)
-    )
+    await _upsert_cycle_setting(session, _KEYS["daily_report_enabled"], _to_bool_str(enabled))
     await _upsert_cycle_setting(
         session, _KEYS["daily_report_hour"], str(_safe_hour(daily_report_hour))
     )

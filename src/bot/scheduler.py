@@ -332,7 +332,9 @@ async def daily_report(
             try:
                 issues = list(rm_user.issue.filter(assigned_to_id=uid, status_id="open"))
             except Exception as e:
-                logger.error("❌ Redmine (%s, user %s): %s", "утренний отчёт", uid, e, exc_info=True)
+                logger.error(
+                    "❌ Redmine (%s, user %s): %s", "утренний отчёт", uid, e, exc_info=True
+                )
                 continue
 
             today = today_tz()
@@ -373,13 +375,9 @@ async def daily_report(
                 overdue_items_html=overdue_items_html,
             )
             try:
-                html, plain_opt = await render_named_template(
-                    db_session, "tpl_daily_report", ctx
-                )
+                html, plain_opt = await render_named_template(db_session, "tpl_daily_report", ctx)
             except Exception as e:
-                logger.error(
-                    "❌ Рендер tpl_daily_report для user %s: %s", uid, e, exc_info=True
-                )
+                logger.error("❌ Рендер tpl_daily_report для user %s: %s", uid, e, exc_info=True)
                 continue
             plain = (plain_opt or "").strip() or _strip_html_to_plain(html)
 

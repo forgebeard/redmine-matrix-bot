@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
-import hashlib
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -58,7 +58,9 @@ def assert_json_serializable_payload(payload: dict[str, Any]) -> None:
     json.dumps(payload)
 
 
-def _build_dedup_key(issue: Any, journal: Any, event_type: str, changes: list[dict[str, str]] | None = None) -> str:
+def _build_dedup_key(
+    issue: Any, journal: Any, event_type: str, changes: list[dict[str, str]] | None = None
+) -> str:
     issue_id = int(getattr(issue, "id", 0) or 0)
     journal_id = int(getattr(journal, "id", 0) or 0)
     if journal_id > 0:
@@ -223,7 +225,9 @@ async def personal_recipient_cfgs(
     return out
 
 
-def _build_structured_changes(journal: Any, catalogs: Any | None) -> tuple[list[dict[str, str]], int, str]:
+def _build_structured_changes(
+    journal: Any, catalogs: Any | None
+) -> tuple[list[dict[str, str]], int, str]:
     from bot.logic import FIELD_NAMES, resolve_field_value
 
     changes: list[dict[str, str]] = []
@@ -303,7 +307,9 @@ def build_journal_template_context(
             "extra_changes": extra_changes,
             "status_from": status_from,
             "assigned_from": assigned_from,
-            "version_line": _line_with_delta(str(base_ctx.get("version") or "—"), changes, "Версия"),
+            "version_line": _line_with_delta(
+                str(base_ctx.get("version") or "—"), changes, "Версия"
+            ),
             "status_line": _line_with_delta(str(base_ctx.get("status") or "—"), changes, "Статус"),
             "priority_line": _line_with_delta(
                 str(base_ctx.get("priority") or "—"), changes, "Приоритет"
@@ -345,7 +351,9 @@ async def journal_render_send_or_dlq(
             "formatted_body": html,
         }
         resolved = await resolve_room(client, room_id)
-        await room_send_with_retry(client, resolved, content, txn_id=_txn_id_from_dedup_key(dedup_key))
+        await room_send_with_retry(
+            client, resolved, content, txn_id=_txn_id_from_dedup_key(dedup_key)
+        )
     except Exception as e:
         err = str(e)
         if content is not None:
@@ -421,7 +429,11 @@ async def handle_journal_entry(
     )
 
     try:
-        tpl_name = "tpl_new_issue" if len(list(getattr(issue, "journals", None) or [])) == 1 else "tpl_task_change"
+        tpl_name = (
+            "tpl_new_issue"
+            if len(list(getattr(issue, "journals", None) or [])) == 1
+            else "tpl_task_change"
+        )
     except Exception:
         tpl_name = "tpl_task_change"
 

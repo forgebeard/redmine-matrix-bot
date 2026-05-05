@@ -441,7 +441,7 @@ def test_groups_create_requires_room(client: TestClient):
         "name": "pytest_tmp_group_validation",
         "timezone_name": "",
         "is_active": "1",
-        "notify_preset": "all",
+        "status_preset": "all",
         "csrf_token": token,
     }
     r1 = client.post(
@@ -493,7 +493,7 @@ def test_users_create_redirects_with_highlight_and_marks_row(client: TestClient)
             "redmine_id": str(redmine_id),
             "display_name": "pytest user highlight",
             "room": room,
-            "notify_preset": "all",
+            "status_preset": "all",
             "version_preset": "all",
             "csrf_token": token,
         },
@@ -528,7 +528,7 @@ def test_groups_create_redirects_with_highlight_and_marks_row(client: TestClient
             "room_id": room_id,
             "timezone_name": "Europe/Moscow",
             "is_active": "1",
-            "notify_preset": "all",
+            "status_preset": "all",
             "version_preset": "all",
             "csrf_token": token,
         },
@@ -578,13 +578,24 @@ def test_users_custom_notify_and_versions_are_persisted(client: TestClient, monk
     if not db_url or not db_url.startswith("postgresql://"):
         pytest.skip("Тест требует Postgres (DATABASE_URL)")
 
-    async def _fake_catalogs(_session):
-        return (
-            [{"key": "n_new", "label": "Новые"}, {"key": "n_overdue", "label": "Просроченные"}],
-            ["v1.0", "v2.0"],
-        )
+    async def _fake_statuses(_session):
+        return [
+            {"key": "n_new", "label": "Новые", "is_default": False},
+            {"key": "n_overdue", "label": "Просроченные", "is_default": False},
+        ]
 
-    monkeypatch.setattr(admin_main, "_load_catalogs", _fake_catalogs)
+    async def _fake_versions(_session):
+        return [
+            {"key": "v1.0", "label": "v1.0", "is_default": False},
+            {"key": "v2.0", "label": "v2.0", "is_default": False},
+        ]
+
+    async def _fake_priorities(_session):
+        return []
+
+    monkeypatch.setattr(admin_main, "_load_statuses_catalog", _fake_statuses)
+    monkeypatch.setattr(admin_main, "_load_versions_catalog", _fake_versions)
+    monkeypatch.setattr(admin_main, "_load_priorities_catalog", _fake_priorities)
     _setup_and_login_admin(client)
     token = client.cookies.get("admin_csrf")
     redmine_id = 990000 + (abs(hash(uuid4().hex)) % 9999)
@@ -596,8 +607,8 @@ def test_users_custom_notify_and_versions_are_persisted(client: TestClient, monk
             "redmine_id": str(redmine_id),
             "display_name": "pytest custom catalogs",
             "room": room,
-            "notify_preset": "custom",
-            "notify_values": ["n_new", "n_overdue", "ghost_notify"],
+            "status_preset": "custom",
+            "status_values": ["n_new", "n_overdue", "ghost_notify"],
             "version_preset": "custom",
             "version_values": ["v1.0", "v2.0", "ghost_version"],
             "csrf_token": token,
@@ -613,12 +624,12 @@ def test_users_custom_notify_and_versions_are_persisted(client: TestClient, monk
     edit_page = client.get(f"/users/{user_id}/edit")
     assert edit_page.status_code == 200
     text = edit_page.text
-    assert 'name="notify_preset" value="custom" checked' in text
+    assert 'name="status_preset" value="custom" checked' in text
     assert 'name="version_preset" value="custom" checked' in text
-    assert 'name="notify_values" value="n_new" checked' in text
-    assert 'name="notify_values" value="n_overdue" checked' in text
-    assert 'name="version_values" value="v1.0" checked' in text
-    assert 'name="version_values" value="v2.0" checked' in text
+    assert re.search(r'name="status_values"[^>]*value="n_new"[^>]*checked', text)
+    assert re.search(r'name="status_values"[^>]*value="n_overdue"[^>]*checked', text)
+    assert re.search(r'name="version_values"[^>]*value="v1\.0"[^>]*checked', text)
+    assert re.search(r'name="version_values"[^>]*value="v2\.0"[^>]*checked', text)
     assert 'value="ghost_notify"' not in text
     assert 'value="ghost_version"' not in text
 
@@ -639,7 +650,7 @@ def test_full_flow_group_user_assignment_update_and_delete(client: TestClient):
             "name": group_name,
             "room_id": room_id,
             "timezone_name": "Europe/Moscow",
-            "notify_preset": "all",
+            "status_preset": "all",
             "version_preset": "all",
             "csrf_token": token,
         },
@@ -659,7 +670,7 @@ def test_full_flow_group_user_assignment_update_and_delete(client: TestClient):
             "display_name": user_name,
             "group_id": str(gid),
             "room": user_room,
-            "notify_preset": "all",
+            "status_preset": "all",
             "version_preset": "all",
             "csrf_token": token,
         },
@@ -681,7 +692,7 @@ def test_full_flow_group_user_assignment_update_and_delete(client: TestClient):
             "name": updated_group_name,
             "room_id": room_id,
             "timezone_name": "Europe/Moscow",
-            "notify_preset": "all",
+            "status_preset": "all",
             "version_preset": "all",
             "csrf_token": token,
         },
@@ -697,7 +708,7 @@ def test_full_flow_group_user_assignment_update_and_delete(client: TestClient):
             "display_name": f"{user_name} updated",
             "group_id": str(gid),
             "room": user_room,
-            "notify_preset": "all",
+            "status_preset": "all",
             "version_preset": "all",
             "csrf_token": token,
         },
@@ -737,7 +748,7 @@ def test_user_and_group_version_routes_add_and_delete(client: TestClient):
             "name": f"pytest-vroutes-group-{suffix}",
             "room_id": f"!pytest-vroutes-group-{suffix}:server",
             "timezone_name": "Europe/Moscow",
-            "notify_preset": "all",
+            "status_preset": "all",
             "version_preset": "all",
             "csrf_token": token,
         },
@@ -754,7 +765,7 @@ def test_user_and_group_version_routes_add_and_delete(client: TestClient):
             "display_name": f"pytest-vroutes-user-{suffix}",
             "group_id": str(gid),
             "room": f"!pytest-vroutes-user-{suffix}:server",
-            "notify_preset": "all",
+            "status_preset": "all",
             "version_preset": "all",
             "csrf_token": token,
         },

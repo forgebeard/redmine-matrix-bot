@@ -20,7 +20,9 @@ async def get_last_journal_id(session: AsyncSession, issue_id: int) -> int:
     return int(row or 0)
 
 
-async def upsert_last_journal_id(session: AsyncSession, issue_id: int, last_journal_id: int) -> None:
+async def upsert_last_journal_id(
+    session: AsyncSession, issue_id: int, last_journal_id: int
+) -> None:
     now = datetime.now(UTC)
     stmt = pg_insert(BotIssueJournalCursor).values(
         issue_id=issue_id,

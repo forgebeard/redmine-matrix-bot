@@ -39,9 +39,7 @@ async def list_digest_rows_for_users(
 ) -> list[PendingDigest]:
     if not user_ids:
         return []
-    result = await session.execute(
-        select(PendingDigest).where(PendingDigest.user_id.in_(user_ids))
-    )
+    result = await session.execute(select(PendingDigest).where(PendingDigest.user_id.in_(user_ids)))
     return list(result.scalars().all())
 
 

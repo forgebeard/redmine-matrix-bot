@@ -23,14 +23,14 @@ EVENT_TO_TEMPLATE: dict[str, str] = {
 def assert_event_map_covers_notification_types() -> None:
     """Все типы из NOTIFICATION_TYPES, кроме исключений, имеют целевой tpl."""
     all_keys = set(NOTIFICATION_TYPES)
-    missing = (
-        all_keys - NOTIFICATION_TYPES_EXCLUDED_FROM_EVENT_MAP - set(EVENT_TO_TEMPLATE.keys())
-    )
+    missing = all_keys - NOTIFICATION_TYPES_EXCLUDED_FROM_EVENT_MAP - set(EVENT_TO_TEMPLATE.keys())
     if missing:
         raise AssertionError(f"EVENT_TO_TEMPLATE missing keys: {sorted(missing)}")
     unknown = set(EVENT_TO_TEMPLATE.keys()) - all_keys
     if unknown:
-        raise AssertionError(f"EVENT_TO_TEMPLATE has keys not in NOTIFICATION_TYPES: {sorted(unknown)}")
+        raise AssertionError(
+            f"EVENT_TO_TEMPLATE has keys not in NOTIFICATION_TYPES: {sorted(unknown)}"
+        )
 
 
 assert_event_map_covers_notification_types()

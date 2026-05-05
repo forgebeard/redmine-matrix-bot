@@ -203,7 +203,9 @@ async def process_reminders(
         plain = f"#{issue.id} {base_ctx['subject']}: напоминание"
 
         group_due = st.group_reminder_due_at is not None and st.group_reminder_due_at <= now_u
-        personal_due = st.personal_reminder_due_at is not None and st.personal_reminder_due_at <= now_u
+        personal_due = (
+            st.personal_reminder_due_at is not None and st.personal_reminder_due_at <= now_u
+        )
 
         matched = get_matching_route(issue, routes_cfg, cfg, groups=groups)
         if group_due and matched and matched.room_id.strip():

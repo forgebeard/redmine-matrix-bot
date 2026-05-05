@@ -8,8 +8,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.sender import REDMINE_URL
-from bot.sender import resolve_room
+from bot.sender import REDMINE_URL, resolve_room
 
 # tpl_digest — отдельная модель контекста (только ``items``), не ``build_issue_context``.
 from bot.template_loader import render_named_template
@@ -76,7 +75,9 @@ def _aggregate_digest_items(rows: list[Any]) -> list[dict[str, Any]]:
         event_type = str(r.event_type or "")
         if event_type:
             item["events"].append(event_type)
-            item["changes"].append({"field": "Событие", "old": "—", "new": _event_label(event_type)})
+            item["changes"].append(
+                {"field": "Событие", "old": "—", "new": _event_label(event_type)}
+            )
         if event_type == "reminder":
             item["reminders_count"] = int(item["reminders_count"]) + 1
         notes = str(r.journal_notes or "").strip()

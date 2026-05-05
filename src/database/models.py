@@ -219,9 +219,15 @@ class BotIssueState(Base):
     # journals: последний journal_id (legacy; глобальный курсор — bot_issue_journal_cursor)
     last_journal_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
-    status_changed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    group_reminder_due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    personal_reminder_due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    status_changed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    group_reminder_due_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    personal_reminder_due_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     reminder_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     # reminders / overdue таймеры

@@ -30,7 +30,9 @@ assert set(TEMPLATE_NAMES) == set(NOTIFICATION_TEMPLATE_LABELS.keys())
 
 
 async def get_template_row(session: AsyncSession, name: str) -> NotificationTemplate | None:
-    return await session.scalar(select(NotificationTemplate).where(NotificationTemplate.name == name))
+    return await session.scalar(
+        select(NotificationTemplate).where(NotificationTemplate.name == name)
+    )
 
 
 async def list_all_templates(session: AsyncSession) -> list[NotificationTemplate]:

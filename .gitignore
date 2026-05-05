@@ -8,6 +8,7 @@ data/.app_master_key
 venv/
 
 # Логи
+admin_audit.log
 bot.log
 bot.log.*
 data/bot.log

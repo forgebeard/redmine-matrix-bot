@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import logging
 import os
+from datetime import UTC, datetime
 from types import SimpleNamespace
-from datetime import UTC, datetime, timedelta
-from typing import Any, Callable
+from typing import Any
 
-from bot.async_utils import run_in_thread
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from bot.async_utils import run_in_thread
 from database.journal_cursor_repo import get_last_journal_id, upsert_last_journal_id
 from database.models import BotUser, CycleSettings
 from database.watcher_cache_repo import replace_watchers_for_issue
@@ -29,7 +29,7 @@ def _redmine_ts(dt: datetime) -> str:
 
 async def _cycle_str(session: AsyncSession, key: str, default: str = "") -> str:
     row = await session.scalar(select(CycleSettings.value).where(CycleSettings.key == key))
-    return (str(row).strip() if row is not None else default)
+    return str(row).strip() if row is not None else default
 
 
 async def _set_cycle_str(session: AsyncSession, key: str, value: str) -> None:
@@ -93,7 +93,7 @@ def _max_updated_on(issues: list[Any]) -> datetime | None:
             dt = dt.astimezone(UTC)
             if best is None or dt > best:
                 best = dt
-        except Exception:
+        except (TypeError, ValueError, AttributeError):
             continue
     return best
 
@@ -284,7 +284,6 @@ def aggregate_journals_first_old_last_new(journals: list[Any]) -> Any | None:
     if not journals:
         return None
     ordered = sorted(journals, key=lambda j: int(getattr(j, "id", 0) or 0))
-    first = ordered[0]
     last = ordered[-1]
     target_fields = {"status_id", "priority_id", "fixed_version_id", "assigned_to_id"}
 
