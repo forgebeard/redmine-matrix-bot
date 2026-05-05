@@ -199,10 +199,9 @@ async def refresh_runtime_lists_from_db(session_factory: async_sessionmaker) -> 
 def apply_snapshot_to_runtime(
     main_mod: Any,
     cs_mod: Any,
-    proc_mod: Any,
     snap: BotRuntimeSnapshot,
 ) -> None:
-    """Обновляет bot.main, config_state, processor."""
+    """Обновляет bot.main и config_state."""
     from bot.config_state import (
         GROUPS as _SG,
     )
@@ -239,10 +238,6 @@ def apply_snapshot_to_runtime(
     main_mod.BOT_TIMEZONE = snap.bot_timezone
     main_mod.BOT_TZ = snap.bot_tz
     main_mod.MATRIX_DEVICE_ID = snap.matrix_device_id
-
-    proc_mod.GROUP_REPEAT_SECONDS = snap.group_repeat_seconds
-    proc_mod.REMINDER_AFTER = snap.reminder_after
-
 
 def reschedule_after_reload(
     scheduler: AsyncIOScheduler,
@@ -338,9 +333,8 @@ async def run_hot_reload_once(
     logger.info("♻ Hot reload: конфигурация из БД изменилась (poll/шаблоны/пользователи/интервалы)")
 
     import bot.config_state as cs_mod
-    import bot.processor as proc_mod
 
-    apply_snapshot_to_runtime(main_mod, cs_mod, proc_mod, snap)
+    apply_snapshot_to_runtime(main_mod, cs_mod, snap)
     main_mod._hot_reload_last_fp = snap.fingerprint
 
     if scheduler is not None and reload_ctx is not None:

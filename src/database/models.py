@@ -200,8 +200,8 @@ class PendingNotification(Base):
 class BotUserLease(Base):
     __tablename__ = "bot_user_leases"
 
-    # Если несколько инстансов бота одновременно, lease гарантирует:
-    # один инстанс выполняет check_user_issues(user) в рамках одного цикла.
+    # Если несколько инстансов бота одновременно, lease гарантирует эксклюзивное
+    # владение обработкой для данного user_redmine_id (напр. задачи без исполнителя).
     user_redmine_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, nullable=False)
     lease_owner_id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
     lease_until: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

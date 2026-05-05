@@ -7,13 +7,16 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from bot.catalogs import load_catalogs
 from bot.config_state import GROUPS, ROUTING, USERS
 from bot.digest_service import drain_pending_digests
 from bot.journal_handlers import handle_journal_entry
 from bot.journal_pipeline import (
-    aggregate_journals_first_old_last_new,
     advance_cursor_after_journal,
+    aggregate_journals_first_old_last_new,
     iter_new_journals_for_issue,
     load_bot_user_redmine_ids,
     persist_watermark,
@@ -23,15 +26,12 @@ from bot.journal_pipeline import (
 )
 from bot.reminder_service import process_reminders, update_reminder_timers
 from bot.scheduler import retry_dlq_notifications
+from database.models import BotUser
 from database.session import get_session_factory
 from database.watcher_cache_repo import (
     delete_stale_watcher_rows,
     issue_ids_watched_by_bot_users,
 )
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from database.models import BotUser
 
 logger = logging.getLogger("redmine_bot")
 
@@ -66,7 +66,7 @@ async def run_journal_tick(
     *,
     now_tz: Callable[[], Any],
 ) -> None:
-    """Точка входа планировщика при ``JOURNAL_ENGINE_ENABLED``."""
+    """Точка входа планировщика для основного тика назначенных задач и напоминаний."""
     global _TICK_COUNTER
     _TICK_COUNTER += 1
 
@@ -86,7 +86,9 @@ async def run_journal_tick(
 
         users = list(USERS)
         ubid = _users_by_bot_id(users)
-        await drain_pending_digests(client, session, users_by_bot_id=ubid, drain_max_users=drain_max)
+        await drain_pending_digests(
+            client, session, users_by_bot_id=ubid, drain_max_users=drain_max
+        )
 
         bot_ids = await load_bot_user_redmine_ids(session)
         watched = await issue_ids_watched_by_bot_users(session)

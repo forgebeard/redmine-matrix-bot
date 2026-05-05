@@ -3,11 +3,13 @@
 Дата: 2026-04-21  
 Объём: сквозной аудит `UI -> DB -> runtime -> check/filter -> route -> template -> send/DLQ`
 
+**Актуализация кода после даты аудита:** модуль `src/bot/processor.py` и `check_user_issues` удалены из репозитория; `check_all_users` вызывает только `run_journal_tick`. Ключ `JOURNAL_ENGINE_ENABLED` в актуальном `src/` не читается (ветвления по нему нет). Ниже сохранён текст расследования на момент среза; строки, ссылающиеся на `processor` и «legacy внутри `check_all_users` по флагу», относятся к **историческому** состоянию кода и baseline, а не к текущему дереву.
+
 ## 1) Источники и baseline
 
 - SQL baseline снят из runtime Postgres и сохранён в `docs/audit_baseline_2026-04-21.sql.md`.
 - Runtime evidence взят из `data/bot.log`.
-- Кодовые точки: `src/admin/routes/users.py`, `src/admin/routes/groups.py`, `src/database/load_config.py`, `src/bot/logic.py`, `src/preferences.py`, `src/bot/processor.py`, `src/bot/journal_tick.py`, `src/bot/journal_handlers.py`, `src/bot/scheduler.py`, `src/bot/main.py`.
+- Кодовые точки (на дату аудита; `processor.py` с тех пор удалён): `src/admin/routes/users.py`, `src/admin/routes/groups.py`, `src/database/load_config.py`, `src/bot/logic.py`, `src/preferences.py`, `src/bot/journal_tick.py`, `src/bot/journal_handlers.py`, `src/bot/scheduler.py`, `src/bot/main.py`.
 
 Ключевые факты baseline:
 

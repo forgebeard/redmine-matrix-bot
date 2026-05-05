@@ -20,12 +20,15 @@
 |----------|----------|
 | [ARCHITECTURE_ADMIN_DB_BOT.md](ARCHITECTURE_ADMIN_DB_BOT.md) | Архитектурный обзор admin/bot/db |
 | [JOURNAL_ENGINE_AND_SENDER.md](JOURNAL_ENGINE_AND_SENDER.md) | Технические детали журналов и sender |
+| [RUNTIME_ROUTING_CONFIG.md](RUNTIME_ROUTING_CONFIG.md) | Источники правды: маршруты комнат в runtime (БД → maps vs routes_config) |
+| [CYCLE_SETTINGS_KEYS.md](CYCLE_SETTINGS_KEYS.md) | Поддерживаемые и deprecated ключи `cycle_settings` |
 | [TZ_BOT_V2_IMPLEMENTATION.md](TZ_BOT_V2_IMPLEMENTATION.md) | Реализационные заметки по журналному движку (исторический контекст и текущие ключи) |
 | [NOTIFY_TEMPLATE_MIGRATION.md](NOTIFY_TEMPLATE_MIGRATION.md) | История миграции старых NOTIFY_TEMPLATE ключей на tpl-контур |
 | [template_context_audit.md](template_context_audit.md) | Контракт контекста Jinja-шаблонов |
 | [ADR_unified_notification_templates.md](ADR_unified_notification_templates.md) | ADR по унификации шаблонов уведомлений |
 | [AUDIT_notification_links_2026-04-21.md](AUDIT_notification_links_2026-04-21.md) | Аудит маршрутизации/ссылок (снимок) |
 | [LOGGING_DUPLICATION_DIAGNOSIS_2026-04-21.md](LOGGING_DUPLICATION_DIAGNOSIS_2026-04-21.md) | Диагностика и устранение дублирования логов |
+| [RUFF_BACKLOG.md](RUFF_BACKLOG.md) | Backlog исторических ruff-замечаний и порядок зачистки |
 
 ## Historical / Obsolete
 

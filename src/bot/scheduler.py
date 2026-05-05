@@ -60,7 +60,6 @@ async def check_all_users(
     bot_instance_id,
     bot_lease_ttl: int,
     redmine_client_for_user: Callable[[Redmine, dict[str, Any]], Redmine],
-    check_user_issues_fn: Callable[..., Any],
     last_check_time: dict[int, datetime],
     max_concurrent: int = 5,
 ) -> None:

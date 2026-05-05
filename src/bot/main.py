@@ -77,7 +77,6 @@ __all__ = [
     "_group_member_rooms",
     "send_matrix_message",
     "send_safe",
-    "check_user_issues",
     "check_all_users",
     "daily_report",
     "cleanup_state_files",
@@ -127,7 +126,6 @@ def _group_member_rooms(user_cfg: dict) -> set[str]:
 # ── Re-export sender и scheduler для тестов ──────────────────────────────────
 # fmt: off
 import bot.sender as _sender_mod  # noqa: E402, I001
-from bot.processor import check_user_issues  # noqa: E402, I001
 from bot.scheduler import check_all_users, cleanup_state_files, daily_report  # noqa: E402, I001
 from bot.sender import send_matrix_message, send_safe  # noqa: E402, I001
 # fmt: on
@@ -212,7 +210,7 @@ def _has_file_handler(log: logging.Logger, target_path: Path) -> bool:
         try:
             if str(Path(getattr(h, "baseFilename", "")).resolve()) == target:
                 return True
-        except Exception:
+        except (OSError, TypeError, ValueError):
             continue
     return False
 
@@ -533,12 +531,6 @@ async def main() -> None:
     _sender_mod.REDMINE_URL = REDMINE_URL
     _sender_mod.PORTAL_BASE_URL = PORTAL_BASE_URL or REDMINE_URL
 
-    # ── Инициализация processor config ──
-    import bot.processor as _proc_mod
-
-    _proc_mod.GROUP_REPEAT_SECONDS = GROUP_REPEAT_SECONDS
-    _proc_mod.REMINDER_AFTER = REMINDER_AFTER
-
     # ── Подключение к Matrix ──
     from nio import AsyncClient
 
@@ -589,7 +581,6 @@ async def main() -> None:
     # ── Импорт функций для scheduler ──
     from bot.command_worker import process_backend_commands
     from bot.heartbeat import start_heartbeat_task
-    from bot.processor import check_user_issues
     from bot.scheduler import (
         check_all_users,
         check_unassigned_new_issues,
@@ -653,7 +644,6 @@ async def main() -> None:
             "bot_instance_id": BOT_INSTANCE_ID_UUID,
             "bot_lease_ttl": BOT_LEASE_TTL_SECONDS,
             "redmine_client_for_user": _redmine_client_for_user,
-            "check_user_issues_fn": check_user_issues,
             "last_check_time": _last_check_time,
             "max_concurrent": 5,
         },

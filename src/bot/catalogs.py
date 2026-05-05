@@ -37,7 +37,7 @@ VALID_STATUS_ROLES = frozenset(
 
 @dataclass(frozen=True)
 class BotCatalogs:
-    """Все справочники из БД. Передаётся в processor/sender/scheduler."""
+    """Все справочники из БД. Передаётся в handler'ы бота и sender."""
 
     # ── Статусы ──────────────────────────────────────────────────────
     status_id_to_name: dict[int, str] = field(default_factory=dict)

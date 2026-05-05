@@ -56,8 +56,7 @@ def decide_first_issue_notification(
 ) -> IssueDecision | None:
     """Return decision for first-time notification event.
 
-    This is the first extraction step from `bot.processor`: the decision lives
-    in backend-side domain code and bot runtime only executes it.
+    Decision lives in backend-side domain code; bot runtime consumes it where applicable.
     """
     if already_sent:
         return None

@@ -1,6 +1,8 @@
 """
 Загрузка USERS / STATUS_ROOM_MAP / VERSION_ROOM_MAP из Postgres
 в формате, совместимом с bot.py и .env JSON.
+
+См. двойные проекции маршрутов (мапы vs routes_config): docs/RUNTIME_ROUTING_CONFIG.md
 """
 
 from __future__ import annotations
@@ -24,6 +26,37 @@ from .models import (
 from .session import get_session_factory
 
 logger = logging.getLogger("redmine_bot")
+
+
+def _routes_and_flat_map(
+    rows: list[Any],
+    *,
+    key_field: str,
+    source_name: str,
+) -> tuple[dict[str, str], list[dict[str, Any]]]:
+    """
+    Строит одновременно плоскую map-проекцию и list-проекцию маршрутов.
+
+    Это единая точка сборки для глобальных status/version route-таблиц.
+    """
+    flat_map: dict[str, str] = {}
+    routes: list[dict[str, Any]] = []
+    for row in rows:
+        key = str(getattr(row, key_field))
+        room_id = str(getattr(row, "room_id"))
+        flat_map[key] = room_id
+        routes.append(
+            {
+                key_field: key,
+                "room_id": room_id,
+                "priority": int(getattr(row, "priority")),
+                "sort_order": int(getattr(row, "sort_order")),
+                "notify_on_assignment": bool(getattr(row, "notify_on_assignment")),
+                "route_source": source_name,
+                "route_id": int(getattr(row, "id")),
+            }
+        )
+    return flat_map, routes
 
 
 def user_orm_to_cfg(
@@ -173,19 +206,11 @@ async def fetch_runtime_config(
         )
     )
     status_rows = list(r_st.scalars().all())
-    status_map = {row.status_key: row.room_id for row in status_rows}
-    status_routes = [
-        {
-            "status_key": row.status_key,
-            "room_id": row.room_id,
-            "priority": int(row.priority),
-            "sort_order": int(row.sort_order),
-            "notify_on_assignment": bool(row.notify_on_assignment),
-            "route_source": "status_room_route",
-            "route_id": row.id,
-        }
-        for row in status_rows
-    ]
+    status_map, status_routes = _routes_and_flat_map(
+        status_rows,
+        key_field="status_key",
+        source_name="status_room_route",
+    )
 
     r_ver = await session.execute(
         select(VersionRoomRoute).order_by(
@@ -195,19 +220,11 @@ async def fetch_runtime_config(
         )
     )
     version_rows = list(r_ver.scalars().all())
-    version_map = {row.version_key: row.room_id for row in version_rows}
-    version_routes_global = [
-        {
-            "version_key": row.version_key,
-            "room_id": row.room_id,
-            "priority": int(row.priority),
-            "sort_order": int(row.sort_order),
-            "notify_on_assignment": bool(row.notify_on_assignment),
-            "route_source": "version_room_route",
-            "route_id": row.id,
-        }
-        for row in version_rows
-    ]
+    version_map, version_routes_global = _routes_and_flat_map(
+        version_rows,
+        key_field="version_key",
+        source_name="version_room_route",
+    )
 
     routes_config: dict[str, Any] = {
         "status_routes": status_routes,

@@ -78,6 +78,7 @@ def _v5_plain_issue_update(context: dict[str, Any]) -> str:
     ]
     return _plain_prefixed(lines)
 
+
 # ── Config (заполняется из main.py при старте) ──────────────────────────────
 
 REDMINE_URL: str = ""
@@ -171,7 +172,7 @@ async def prewarm_dm_rooms(client: AsyncClient, mxids: list[str]) -> None:
         except TimeoutError:
             logger.warning("⏱ Pre-warm DM timeout: %s (пропуск)", target_mxid)
             failed_count += 1
-        except Exception as e:
+        except (RuntimeError, ValueError, OSError) as e:
             error_msg = str(e)
             if "429" in error_msg or "ratelimited" in error_msg.lower():
                 # Rate-limited — ждём дольше и пробуем дальше
@@ -189,7 +190,7 @@ async def prewarm_dm_rooms(client: AsyncClient, mxids: list[str]) -> None:
                     _mxid_to_room_cache[target_mxid] = room_id
                     created_count += 1
                     logger.info("✅ DM создан (retry): %s → %s", target_mxid, room_id)
-                except Exception as retry_err:
+                except (RuntimeError, ValueError, OSError) as retry_err:
                     logger.warning("⚠ Pre-warm DM retry failed: %s — %s", target_mxid, retry_err)
                     failed_count += 1
             else:

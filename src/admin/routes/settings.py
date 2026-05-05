@@ -214,7 +214,7 @@ async def regenerate_db_config(
                 row.ciphertext = enc.ciphertext
                 row.nonce = enc.nonce
                 row.key_version = enc.key_version
-            except Exception:
+            except (ValueError, TypeError):
                 pass
         await session.commit()
 
@@ -354,7 +354,9 @@ async def onboarding_save(
     # Single-URL UX: если оператор явно сохранил REDMINE_URL,
     # синхронизируем ссылочную базу портала автоматически.
     if updated_redmine_url:
-        existing = await session.execute(select(AppSecret).where(AppSecret.name == "PORTAL_BASE_URL"))
+        existing = await session.execute(
+            select(AppSecret).where(AppSecret.name == "PORTAL_BASE_URL")
+        )
         row = existing.scalar_one_or_none()
         enc = encrypt_secret(updated_redmine_url, load_master_key())
         if row:

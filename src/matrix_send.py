@@ -35,7 +35,7 @@ def _get_retry_settings() -> tuple[int, float]:
         from config import MATRIX_RETRY_BASE_DELAY_SEC, MATRIX_RETRY_MAX_ATTEMPTS
 
         return MATRIX_RETRY_MAX_ATTEMPTS, MATRIX_RETRY_BASE_DELAY_SEC
-    except Exception:
+    except ImportError:
         return 3, 1.0
 
 
@@ -65,7 +65,7 @@ async def room_send_with_retry(client, room_id, content, *, txn_id: str | None =
     Итог: проброс последней ошибки.
     """
     max_retries, retry_base_sec = _get_retry_settings()
-    last_err = None
+    last_err: Exception | None = None
 
     for attempt in range(1, max_retries + 1):
         try:

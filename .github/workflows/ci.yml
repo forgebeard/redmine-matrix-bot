@@ -41,11 +41,10 @@ jobs:
       - name: Ruff format check
         run: python -m ruff format --check src/
       - name: mypy (type check — core files)
-        run: PYTHONPATH=src python -m mypy src/bot/logic.py src/bot/scheduler.py src/bot/processor.py src/matrix_send.py src/config.py src/database/state_repo.py --explicit-package-bases
+        run: PYTHONPATH=src python -m mypy src/bot/logic.py src/bot/scheduler.py src/bot/routing.py src/matrix_send.py src/config.py src/database/state_repo.py src/database/load_config.py --explicit-package-bases
       # DATABASE_URL + postgres service — интеграционные тесты (test_admin_routes_integration и др.)
       - name: pytest (unit + API, без Playwright)
         run: |
-          alembic upgrade head
           alembic upgrade head
           python -m pytest tests/ -q --tb=short --ignore=tests/e2e --cov=src --cov-report=term-missing --cov-fail-under=50
 
@@ -85,6 +84,8 @@ jobs:
         run: python -m playwright install chromium
       - name: pytest e2e (Playwright)
         run: python -m pytest tests/e2e/ -q --tb=short
+        # E2E не блокирует merge в PR: сценарии flaky на внешнем браузерном стеке.
+        # Регулярный контроль — по nightly/manual прогонам и отдельной triage-очереди.
         continue-on-error: true
 
   docker:
